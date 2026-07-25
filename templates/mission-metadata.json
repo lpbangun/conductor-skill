@@ -1,0 +1,7 @@
+{
+  "milestone": "replace-with-milestone-slug",
+  "supervision_mode": "checkpointed",
+  "integration_branch": "main",
+  "contract_path": ".hermes/conductor/mission.json",
+  "dashboard_enabled": false
+}
