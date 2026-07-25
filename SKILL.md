@@ -1,7 +1,7 @@
 ---
 name: conductor
 description: "Use when the user authorizes a multi-step software mission that should continue autonomously across workers, worktrees, reviews, integration gates, failures, or session restarts. Orchestrates Beads as the durable ledger and Herdr as the execution surface with risk-proportional routing, evidence-backed transitions, resource admission, stale-claim recovery, and explicit human boundaries. Do not use for a single bounded task or strategy discussion without execution approval."
-version: 1.4.0
+version: 1.4.1
 author: Hermes Agent
 license: MIT
 platforms: [linux]

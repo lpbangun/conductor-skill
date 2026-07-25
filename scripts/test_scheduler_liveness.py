@@ -35,7 +35,7 @@ def budgets(**overrides):
         "minAvailableRamGb": 2.0,
         "maxMemoryPsiFullAvg10": 5.0,
         "maxSwapOutMiBPerSecond": 64.0,
-        "maxResourceSampleAgeSeconds": 30.0,
+        "resourceSampleSeconds": 10,
     }
     data.update(overrides)
     return data
@@ -220,6 +220,23 @@ class SpeedFirstSchedulerTests(unittest.TestCase):
     def test_active_swap_out_blocks_new_dispatch(self):
         result = self.plan(ready=[task("a")], resources=safe_resources(swapOutMiBPerSecond=64.0))
         self.assertEqual([], result["selectedTaskIds"])
+
+    def test_packaged_mission_budget_is_scheduler_compatible(self):
+        template = json.loads((SCRIPT_DIR.parent / "templates" / "mission.json").read_text())
+        budgets = template["budgets"]
+        fresh = self.plan(
+            ready=[task("a"), task("b")],
+            budgets=budgets,
+            resources=safe_resources(sampleAgeSeconds=budgets["resourceSampleSeconds"]),
+        )
+        self.assertEqual(["a", "b"], fresh["selectedTaskIds"])
+        stale = self.plan(
+            ready=[task("a")],
+            budgets=budgets,
+            resources=safe_resources(sampleAgeSeconds=budgets["resourceSampleSeconds"] + 0.001),
+        )
+        self.assertEqual([], stale["selectedTaskIds"])
+        self.assertEqual("resource_pressure", stale["dispatchBlockedReason"])
 
     def test_missing_malformed_nonfinite_or_boolean_metric_fails_closed(self):
         bad_values = [None, "6.4", float("nan"), float("inf"), True]

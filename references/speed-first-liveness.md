@@ -32,7 +32,7 @@ The snapshot contains:
 - fresh available-RAM, PSI-full, active-swap-out, and sample-age measurements;
 - non-launch `pendingControlActions`, such as artifact harvest or pane cleanup.
 
-Cumulative swap occupancy is not an admission input. Invalid or stale required measurements fail closed for new launch while control actions continue. For a simultaneous dispatch set, the sum of newly admitted `ramReserveGb` values must leave strictly more than `minAvailableRamGb` in the live post-active `availableRamGb` snapshot.
+Cumulative swap occupancy is not an admission input. Invalid or stale required measurements fail closed for new launch while control actions continue; `sampleAgeSeconds` must be at most the approved `resourceSampleSeconds`. For a simultaneous dispatch set, the sum of newly admitted `ramReserveGb` values must leave strictly more than `minAvailableRamGb` in the live post-active `availableRamGb` snapshot.
 
 The planner is advisory control-plane code: Conductor still verifies claims, paths, ownership, and evidence before performing actions. Do not hand-edit its selection to serialize a safe lane. If its output is wrong, stop and fix the snapshot or planner test.
 

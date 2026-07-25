@@ -30,7 +30,7 @@ _REQUIRED_BUDGETS = (
     "minAvailableRamGb",
     "maxMemoryPsiFullAvg10",
     "maxSwapOutMiBPerSecond",
-    "maxResourceSampleAgeSeconds",
+    "resourceSampleSeconds",
 )
 
 
@@ -61,7 +61,7 @@ def _pressure_safe(resources: dict[str, Any], budgets: dict[str, Any]) -> bool:
         resources["availableRamGb"] > budgets["minAvailableRamGb"]
         and resources["memoryPsiFullAvg10"] < budgets["maxMemoryPsiFullAvg10"]
         and resources["swapOutMiBPerSecond"] < budgets["maxSwapOutMiBPerSecond"]
-        and resources["sampleAgeSeconds"] <= budgets["maxResourceSampleAgeSeconds"]
+        and resources["sampleAgeSeconds"] <= budgets["resourceSampleSeconds"]
     )
 
 
