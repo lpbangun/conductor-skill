@@ -6,7 +6,14 @@ The installed binaries are authoritative. Run `bd <command> --help` and the rele
 
 ```bash
 # Copy templates/mission-metadata.json into .hermes/conductor/ and replace every placeholder first.
-bd -C "$REPO" init --skip-agents --init-if-missing --non-interactive
+# Some Beads versions resolve -C only after discovering an existing project, so first-time
+# initialization must run with the shell cwd set to the repository.
+(
+  cd "$REPO"
+  bd init --skip-agents --skip-hooks --setup-exclude --init-if-missing --non-interactive
+)
+
+# Once .beads exists, -C is safe for every later command.
 bd -C "$REPO" metrics off
 
 MISSION_ID=$(bd -C "$REPO" create "$MISSION_TITLE" \
@@ -43,6 +50,8 @@ bd -C "$REPO" blocked --json
 ```
 
 Priority is urgency. Risk remains in labels/metadata.
+
+Preserve graph width. Create one Bead per plan-declared disjoint lane and add only evidence-bearing dependencies. Do not collapse parallel lanes into one task or add a convenience dependency merely to express preferred order. When the mission permits at least two workers but `bd ready` exposes fewer than two productive units, compare the ledger to the approved/frozen plan and split oversized units or remove false edges without changing scope or acceptance.
 
 ## Atomic claim and evidence identity
 
@@ -170,6 +179,10 @@ Use live system output before every worker-consuming action, including overnight
 - cumulative swap occupancy alone never blocks; global pressure includes unrelated workloads, but never inspect deeply, stop, pause, or manage unrelated processes;
 - defer only new workspace opening/dispatch under pressure; do not kill existing workers, and continue cleanup/recovery;
 - one full suite and one merge/integration lane at a time;
+- focused tests are not broad suites and do not consume the broad-suite budget; they may overlap with independent work when files, databases, ports, browser profiles, and generated artifacts do not conflict;
+- classify workload from measured execution cost, not task risk: a Critical read-only review with focused tests is normally Standard, while a broad suite or measured high-memory run may be Heavy;
+- when two safe, ready, non-overlapping lanes fit the approved envelope, keep two productive workers active rather than filling capacity with duplicate verification;
+- metadata-only changes or an unchanged product SHA receive focused metadata/schema validation and reuse exact-SHA product evidence; they do not trigger a broad suite;
 - close completed or paused mission-owned panes promptly;
 - preserve Git branches/worktrees unless cleanup authority is explicit;
 - never inspect or close unrelated/user-owned Herdr workspaces;

@@ -117,6 +117,36 @@ class InvocationContractTests(unittest.TestCase):
         for signal in ("available RAM", "memory PSI", "active swap-out"):
             self.assertIn(signal, SKILL)
 
+    # --- Productive parallel scheduling ---
+
+    def test_scheduler_targets_two_productive_workers_when_safe(self):
+        self.assertIn("target at least two productive mission-owned workers", SKILL)
+        self.assertIn("Do not fill the second lane with duplicate verification", SKILL)
+        self.assertNotIn("approved ceiling permits two", SKILL)
+        self.assertIn("process headroom under `maxWorkers`", SKILL)
+        self.assertIn("weighted headroom under `maxWeightedSlots`", SKILL)
+
+    def test_plan_declared_parallel_lanes_remain_separate_beads(self):
+        self.assertIn("plan-declared parallel lanes as separate Beads", SKILL)
+        self.assertIn("convenience dependency", SKILL)
+
+    def test_execution_risk_does_not_imply_resource_class(self):
+        self.assertIn("Execution risk does not determine resource class", SKILL)
+        self.assertIn("read-only review with focused tests", SKILL)
+
+    def test_focused_tests_do_not_consume_broad_suite_lane(self):
+        self.assertIn("Focused tests do not consume", SKILL)
+        self.assertIn("broad-suite budget", SKILL)
+
+    def test_unchanged_product_sha_does_not_trigger_broad_suite(self):
+        self.assertIn("metadata-only changes", SKILL)
+        self.assertIn("unchanged product SHA", SKILL)
+        self.assertIn("must not trigger a broad suite", SKILL)
+        evidence = (ROOT / "references" / "evidence-contract.md").read_text()
+        reuse = "reuse bound broad-suite evidence when the integrated product sha"
+        self.assertIn(reuse, SKILL.lower())
+        self.assertIn(reuse, evidence.lower())
+
     def test_human_boundary_names_active_swap_out_not_generic_swap(self):
         self.assertNotIn("RAM, or swap circuit breaker", SKILL)
 
@@ -197,6 +227,12 @@ class InvocationContractTests(unittest.TestCase):
         self.assertIn("unrelated", lowered)
         self.assertIn("not", lowered)
 
+    def test_readme_documents_productive_parallelism(self):
+        readme = (ROOT / "README.md").read_text().lower()
+        self.assertIn("at least two productive workers", readme)
+        self.assertIn("focused tests", readme)
+        self.assertIn("plan-declared parallel lanes", readme)
+
     def test_readme_swap_occupancy_never_blocks_opening_or_dispatch(self):
         readme = (ROOT / "README.md").read_text().lower()
         self.assertIn("workspace opening or dispatch", readme)
@@ -214,6 +250,14 @@ class InvocationContractTests(unittest.TestCase):
         self.assertIn("weighted", lowered)
         self.assertIn("cumulative swap", lowered)
         self.assertIn("never", lowered)
+
+    def test_skill_package_sync_reference_exists_and_is_enforced(self):
+        path = ROOT / "references" / "skill-package-sync.md"
+        self.assertTrue(path.is_file(), "skill-package-sync.md must exist")
+        ref = path.read_text().lower()
+        for phrase in ("reconcile before copying", "installed skill directory", "byte-for-byte"):
+            self.assertIn(phrase, ref)
+        self.assertIn("references/skill-package-sync.md", SKILL)
 
     def test_validation_reference_requires_pressure_regressions(self):
         ref = (ROOT / "references" / "fail-closed-policy-validation.md").read_text()

@@ -134,10 +134,12 @@ Conductor defaults to:
 - no launch before explicit approval;
 - no push, release, deploy, destructive cleanup, or credential change without exact authority;
 - one mutating owner per worktree;
+- plan-declared parallel lanes remain separate Beads instead of being collapsed into one serial task;
+- at least two productive workers are targeted whenever two dependency-ready, non-overlapping lanes fit the approved resource envelope;
 - workload-weighted capacity (`maxWeightedSlots` with `light`/`standard`/`heavy` classes) plus an emergency mission-owned process ceiling (`maxWorkers` 1–6) that is not proof of capacity;
 - fail-closed admission using available RAM reserves, memory PSI, and active swap-out rate;
 - independent review for Standard and Critical work;
-- serialized merges, pushes, and broad test suites;
+- serialized merges, pushes, and broad test suites; focused tests may overlap independent work and do not consume broad-suite budget;
 - evidence inspection rather than worker self-report;
 - preservation of branches and worktrees during ambiguous recovery.
 

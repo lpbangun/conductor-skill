@@ -59,7 +59,7 @@ Required:
 - candidate commit SHA confirmed unchanged;
 - merge command/result and merge SHA;
 - focused integrated-base checks with exits;
-- broad-suite result only when this transition is the named milestone gate;
+- broad-suite result only when this transition is the named milestone gate and the declared product tree or broad acceptance surface changed, or a concrete unresolved failure requires it; reuse bound broad-suite evidence when the integrated product SHA and declared broad acceptance surface are unchanged;
 - remote parity if push was authorized.
 
 ### Integrated → closed

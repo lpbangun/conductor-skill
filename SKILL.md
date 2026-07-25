@@ -1,7 +1,7 @@
 ---
 name: conductor
 description: "Use when the user authorizes a multi-step software mission that should continue autonomously across workers, worktrees, reviews, integration gates, failures, or session restarts. Orchestrates Beads as the durable ledger and Herdr as the execution surface with risk-proportional routing, evidence-backed transitions, resource admission, stale-claim recovery, and explicit human boundaries. Do not use for a single bounded task or strategy discussion without execution approval."
-version: 1.3.0
+version: 1.3.3
 author: Hermes Agent
 license: MIT
 platforms: [linux]
@@ -57,7 +57,7 @@ Do not use for:
 4. **One mutating owner per worktree.** Parallel mutation requires separate branches/worktrees. Shared integration files have one named owner.
 5. **No hidden runtime.** Do not create a second database, scheduler, daemon, merge queue, or process registry. Shell directly to `bd --json` and Herdr’s live CLI.
 6. **Risk is not priority.** Beads priority P0–P4 means urgency. Store execution risk independently as `risk:routine`, `risk:standard`, or `risk:critical` labels plus metadata.
-7. **Work-conserving, not swarm-maximizing.** A free worker slot is not a reason to fill it. Schedule only dependency-ready work whose boundaries are stable and whose parallelism does not increase integration risk.
+7. **Work-conserving and parallelism-targeted.** When at least two dependency-ready, non-overlapping lanes are safe and both fit process headroom under `maxWorkers`, weighted headroom under `maxWeightedSlots`, workload-class reserves, and live pressure gates, target at least two productive mission-owned workers. Do not fill the second lane with duplicate verification, speculative work, or shared-seam contention; when fewer than two productive lanes run, record the concrete dependency, ownership, or pressure reason.
 8. **Integration is serialized.** Never run concurrent merges, pushes, or duplicate full suites. Reconcile against a stable integration SHA before and after each merge.
 9. **Push is denied by default.** Local commit/merge authority does not imply push, release, deployment, primary-branch merge, history rewrite, or worktree deletion authority.
 10. **The governing skill is immutable during a mission.** Record lessons, but propose policy changes only after mission closure and user review.
@@ -183,11 +183,21 @@ After a restart or context compression, perform this reconciliation before steer
 If the repository has no Beads database and the approved contract allows setup:
 
 ```bash
-bd -C "$REPO" init --skip-agents --init-if-missing --non-interactive
+# First-time initialization must run from the repository cwd. Some Beads versions
+# try to discover an existing project before honoring `-C`, so `bd -C "$REPO" init`
+# fails precisely when `.beads` does not exist yet.
+(
+  cd "$REPO"
+  bd init --skip-agents --skip-hooks --setup-exclude --init-if-missing --non-interactive
+)
+
+# After initialization, use `-C` normally.
 bd -C "$REPO" metrics off
 ```
 
 Create one mission epic, the Beads merge slot, and child tasks. Keep the mission’s stable ID in `mission.json`. Use native parent-child relationships for grouping and blocking dependencies for execution order. See `references/beads-herdr-recipes.md` for exact commands.
+
+Preserve plan-declared parallel lanes as separate Beads with disjoint owner/file boundaries. Add a blocking edge only when downstream acceptance actually requires a predecessor artifact or integrated SHA; a preferred order, broad risk label, or easier bookkeeping is a convenience dependency and must not serialize otherwise independent work. Do not collapse a phase containing independent producer, consumer, surface, fixture, or review lanes into one giant task. Before activation and after each material transition, inspect graph width: if fewer than two units can become ready under a mission that permits two workers, re-check the plan and remove false dependencies or split oversized units without changing product scope or acceptance.
 
 Do not initialize Beads during strategy discussion, overwrite an existing database, or enable an external Dolt server for this mission-owned worker design.
 
@@ -205,6 +215,8 @@ Assign one risk class with a one-sentence rationale and escalation triggers:
 
 Escalate when implementation reveals cross-cutting dependencies, unstable interfaces, security/schema implications, repeated correction, unexpected scope growth, or irreversible effects. Do not downgrade merely to save tokens.
 
+Execution risk does not determine resource class. Classify compute cost from the actual command/model workload: planning and read-only review with focused tests are normally `light` or `standard`; a large mutating agent, broad suite, build, browser run, or measured high-memory workload may be `heavy`. A Critical task can therefore use a Standard worker while retaining every Critical review and acceptance gate.
+
 Use expensive models only for ambiguity and judgment. Prefer Factory Droid’s native `/review` against the exact integration base. If Droid is unavailable, use the `advisor` role read-only. A second reviewer is justified only when it answers a distinct acceptance question.
 
 **Completion criterion:** the Bead contains risk label, rationale, escalation triggers, acceptance criteria, owner/worktree boundaries, and named verification route before claim.
@@ -214,15 +226,16 @@ Use expensive models only for ambiguity and judgment. Prefer Factory Droid’s n
 Before dispatch:
 
 1. Query `bd ready --parent "$MISSION_ID" --json`.
-2. Confirm no overlapping mutating owner or unstable shared seam.
-3. Re-sample global resource pressure before every worker-consuming action, including worktree/workspace opening and overnight dispatch. Read available RAM, `/proc/pressure/memory` `full avg10`, and the `pswpout` delta across `budgets.resourceSampleSeconds`; convert pages with the live system page size to MiB/s.
-4. Require every metric and sampling datum to be present, finite, real (not boolean), and in its valid domain. Missing, malformed, or stale evidence fails closed.
-5. Classify the next workload by an approved `budgets.workloadClasses` profile (`light` / `standard` / `heavy` or another validated class). Do not assume every worker has equal cost. Do not derive a universal worker cap from RAM.
-6. Count only mission-owned active workers and weighted usage. Unrelated workloads affect global pressure and available headroom but must never be counted as owned, inspected deeply, steered, paused, managed, or closed.
-7. Enforce the approved `budgets.maxWeightedSlots` capacity and the emergency `budgets.maxWorkers` process ceiling (1–6). `maxWorkers` is a circuit breaker only—not proof that capacity is available.
-8. Defer worktree/workspace opening and dispatch when any of the following holds: available RAM is at or below `budgets.minAvailableRamGb` or below the next class reserve; memory PSI `full avg10` is at or above `budgets.maxMemoryPsiFullAvg10`; active swap-out rate is at or above `budgets.maxSwapOutMiBPerSecond`; current weighted usage plus next `slotCost` would exceed `maxWeightedSlots`; or the emergency process ceiling would be exceeded. Cumulative swap occupancy is telemetry only and never blocks by itself.
-9. Pressure stops new worker-consuming actions only; never kill existing workers automatically. Cleanup, dead-worker recovery, and unrelated non-launch reconciliation continue.
-10. Never overlap full suites or integration operations.
+2. Reconcile completed workers before admitting replacements. If fewer than two productive workers are active, inspect all ready and near-ready units for a second disjoint lane; do not stop after selecting the first result returned by `bd ready`. Dispatch it only when process headroom under `maxWorkers`, weighted headroom under `maxWeightedSlots`, workload-class reserves, and live pressure gates all admit both active workloads.
+3. Confirm no overlapping mutating owner or unstable shared seam.
+4. Re-sample global resource pressure before every worker-consuming action, including worktree/workspace opening and overnight dispatch. Read available RAM, `/proc/pressure/memory` `full avg10`, and the `pswpout` delta across `budgets.resourceSampleSeconds`; convert pages with the live system page size to MiB/s.
+5. Require every metric and sampling datum to be present, finite, real (not boolean), and in its valid domain. Missing, malformed, or stale evidence fails closed.
+6. Classify the next workload by an approved `budgets.workloadClasses` profile (`light` / `standard` / `heavy` or another validated class). Do not assume every worker has equal cost. Do not derive a universal worker cap from RAM.
+7. Count only mission-owned active workers and weighted usage. Unrelated workloads affect global pressure and available headroom but must never be counted as owned, inspected deeply, steered, paused, managed, or closed.
+8. Enforce the approved `budgets.maxWeightedSlots` capacity and the emergency `budgets.maxWorkers` process ceiling (1–6). `maxWorkers` is a circuit breaker only—not proof that capacity is available.
+9. Defer worktree/workspace opening and dispatch when any of the following holds: available RAM is at or below `budgets.minAvailableRamGb` or below the next class reserve; memory PSI `full avg10` is at or above `budgets.maxMemoryPsiFullAvg10`; active swap-out rate is at or above `budgets.maxSwapOutMiBPerSecond`; current weighted usage plus next `slotCost` would exceed `maxWeightedSlots`; or the emergency process ceiling would be exceeded. Cumulative swap occupancy is telemetry only and never blocks by itself.
+10. Pressure stops new worker-consuming actions only; never kill existing workers automatically. Cleanup, dead-worker recovery, and unrelated non-launch reconciliation continue.
+11. Serialize broad suites and integration operations, not all tests. Focused tests do not consume the broad-suite budget or global broad-suite lane and may overlap independent work when their measured resource class fits. Two focused suites that contend for the same database, ports, browser profile, generated artifacts, or files are not independent.
 
 **Completion criterion:** the selected task is dependency-ready; current pressure, next-class reserve/cost, and weighted capacity are explicitly safe; execution is isolated; and no higher-priority ready unit is skipped without a recorded reason.
 
@@ -265,6 +278,8 @@ Before review, independently inspect:
 - acceptance criteria mapping;
 - prohibited scope changes.
 
+Verification must be change-proportional: metadata-only changes, ignored local mission artifacts, or an unchanged product SHA must not trigger a broad suite. Validate the changed metadata/schema directly and reuse still-bound exact-SHA product evidence. Run a broad suite only when its declared product tree or broad acceptance surface changed, or when a concrete unresolved failure requires it.
+
 Standard/Critical work receives an independent review against the named integration branch. The implementer fixes actionable findings; material fixes require fresh independent re-review. A reviewer that edits a finding cannot certify its own correction.
 
 Store concise evidence in Beads metadata and append detailed command/output references in notes. Follow `references/evidence-contract.md`.
@@ -280,7 +295,7 @@ Only the contract's named integration owner may enter this serialized lane. Refu
 3. Refresh normally without rebasing or rewriting active worker history.
 4. Merge deliberately with a normal/no-fast-forward merge when project policy allows.
 5. Run predetermined focused integration checks.
-6. Run the broad suite only at the mission/milestone gate and within budget.
+6. At a named mission/milestone gate, run the broad suite only when the declared product tree or broad acceptance surface changed, or a concrete unresolved failure requires it, and the budget admits it. Reuse bound broad-suite evidence when the integrated product SHA and declared broad acceptance surface are unchanged.
 7. Record merge SHA, integrated-base test evidence, and branch parity.
 8. Push only if `pushAuthorized` is true for this exact target.
 9. Close the Bead only after integrated evidence exists.
@@ -366,12 +381,13 @@ Do not ask for routine TDD fixes, predetermined reviews, normal task claims, evi
 6. **Conductor coding.** If product code needs judgment or mutation, dispatch a worker.
 7. **Review multiplication.** More reviewers are not automatically safer; each must answer a distinct question.
 8. **Free-slot compulsion.** Parallelism that destabilizes shared seams increases cycle time.
-9. **Full-suite duplication.** One broad-suite owner at one stable SHA.
-10. **Authority creep.** Merge permission does not imply push/release/cleanup permission.
-11. **Premature close.** Worker PASS is not integrated PASS; close only after integration evidence.
-12. **Metric-validity blindness.** Tests that prove a hardcoded threshold is enforced do not prove the metric predicts real pressure. Replay live host states and representative workloads; never use sticky cumulative swap occupancy as a unilateral blocker. Follow `references/resource-admission-validation.md`.
-13. **Free equal-worker assumption.** Do not treat `maxWorkers` or RAM size alone as capacity; use weighted classes and reserves.
-14. **Silent stop override.** A user pause is immediate, not “after the current step.”
+9. **False serialization.** Collapsing plan-declared disjoint lanes into one Bead, labeling every Critical worker Heavy, or treating focused tests as broad work defeats approved concurrency.
+10. **Full-suite duplication.** One broad-suite owner at one stable SHA; unchanged product evidence is reusable.
+11. **Authority creep.** Merge permission does not imply push/release/cleanup permission.
+12. **Premature close.** Worker PASS is not integrated PASS; close only after integration evidence.
+13. **Metric-validity blindness.** Tests that prove a hardcoded threshold is enforced do not prove the metric predicts real pressure. Replay live host states and representative workloads; never use sticky cumulative swap occupancy as a unilateral blocker. Follow `references/resource-admission-validation.md`.
+14. **Free equal-worker assumption.** Do not treat `maxWorkers` or RAM size alone as capacity; use weighted classes and reserves.
+15. **Silent stop override.** A user pause is immediate, not “after the current step.”
 
 ## Context-preserving long stages
 
@@ -415,6 +431,8 @@ The runner must derive every declared pre-mission gate and fail closed on unknow
 ## Policy-change verification
 
 After changing the mission contract, lifecycle rules, authority model, evidence gate, or helper scripts, load `references/fail-closed-policy-validation.md` and run the contract tests, disposable Beads smoke test, and Python compilation commands it defines. Require negative-path coverage for every fail-closed rule and a nearby-valid case for every placeholder detector. For consequential changes, obtain a fresh read-only independent re-review before treating the policy as ready.
+
+When synchronizing a public/source package with the installed skill, load `references/skill-package-sync.md`. Compare before copying, reconcile rather than downgrade, include every file consumed by packaged tests, rerun tests from the installed path, and require byte-identical source/install package files before declaring reload readiness.
 
 ## Verification checklist
 
