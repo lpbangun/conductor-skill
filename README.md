@@ -156,6 +156,7 @@ The controller admission evaluation policy in `references/controller-admission-e
 ```bash
 python3 scripts/test_contract.py -v
 python3 scripts/test_invocation_contract.py -v
+python3 scripts/test_scheduler_liveness.py -v
 python3 scripts/smoke_test.py
 python3 -m py_compile scripts/*.py
 ```
@@ -167,9 +168,9 @@ The smoke test creates only a disposable temporary Git/Beads repository.
 ```text
 .
 ├── SKILL.md                       # Main Hermes skill and operating policy
-├── references/                    # Mission, evidence, recovery, and admission contracts
+├── references/                    # Mission, evidence, recovery, scheduling, and admission contracts
 ├── templates/                     # Mission intake, metadata, and worker brief templates
-└── scripts/                       # Validators, close gate, contract tests, Beads smoke test
+└── scripts/                       # Validators, scheduler/wake helpers, tests, and Beads smoke test
 ```
 
 ## License

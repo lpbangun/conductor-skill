@@ -78,6 +78,7 @@ After any policy or validator change, run:
 ROOT="${HERMES_HOME:-$HOME/.hermes}/skills/autonomous-ai-agents/conductor"
 python3 "$ROOT/scripts/test_contract.py" -v
 python3 "$ROOT/scripts/test_invocation_contract.py" -v
+python3 "$ROOT/scripts/test_scheduler_liveness.py" -v
 python3 "$ROOT/scripts/smoke_test.py"
 python3 -m py_compile "$ROOT/scripts/"*.py
 ```

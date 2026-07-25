@@ -1,7 +1,7 @@
 ---
 name: conductor
 description: "Use when the user authorizes a multi-step software mission that should continue autonomously across workers, worktrees, reviews, integration gates, failures, or session restarts. Orchestrates Beads as the durable ledger and Herdr as the execution surface with risk-proportional routing, evidence-backed transitions, resource admission, stale-claim recovery, and explicit human boundaries. Do not use for a single bounded task or strategy discussion without execution approval."
-version: 1.3.3
+version: 1.4.0
 author: Hermes Agent
 license: MIT
 platforms: [linux]
@@ -55,9 +55,9 @@ Do not use for:
 2. **Conductor does not implement.** Delegate mutating product work to a bounded worker. The conductor may perform deterministic control-plane operations after verified PASS: update Beads, inspect state, create approved worktrees, run predetermined gates, commit already-reviewed changes when explicitly assigned as integration owner, merge without rebase, update the dashboard, and clean up owned resources.
 3. **Evidence beats self-report.** A worker’s “done” is a signal to inspect, never proof. Verify the exact worktree, branch, diff, SHA, commands, exit codes, review verdict, and integrated-base result.
 4. **One mutating owner per worktree.** Parallel mutation requires separate branches/worktrees. Shared integration files have one named owner.
-5. **No hidden runtime.** Do not create a second database, scheduler, daemon, merge queue, or process registry. Shell directly to `bd --json` and Herdr’s live CLI.
+5. **No hidden runtime.** Do not create a second database, scheduler daemon, merge queue, or process registry. Shell directly to `bd --json` and Herdr’s live CLI. A transparent mission-owned one-shot completion notifier is allowed only as defined in `references/speed-first-liveness.md`; it owns no state and performs no reconciliation.
 6. **Risk is not priority.** Beads priority P0–P4 means urgency. Store execution risk independently as `risk:routine`, `risk:standard`, or `risk:critical` labels plus metadata.
-7. **Work-conserving and parallelism-targeted.** When at least two dependency-ready, non-overlapping lanes are safe and both fit process headroom under `maxWorkers`, weighted headroom under `maxWeightedSlots`, workload-class reserves, and live pressure gates, target at least two productive mission-owned workers. Do not fill the second lane with duplicate verification, speculative work, or shared-seam contention; when fewer than two productive lanes run, record the concrete dependency, ownership, or pressure reason.
+7. **Speed-first, work-conserving, and parallelism-targeted.** Useful throughput is the scheduling objective. Resource policy is an admission constraint and circuit breaker, not the optimization target. Use `scripts/scheduler_decision.py` over the complete ready queue and launch the largest admitted set of productive, dependency-ready, non-overlapping lanes. Feasibility includes process headroom under `maxWorkers` and weighted headroom under `maxWeightedSlots`; when two fit, target at least two productive mission-owned workers. Do not fill the second lane with duplicate verification, speculative work, or shared-seam contention. Do not fill additional capacity with those substitutes either; when fewer than two productive lanes run, record the concrete dependency, ownership, capacity, or pressure reason.
 8. **Integration is serialized.** Never run concurrent merges, pushes, or duplicate full suites. Reconcile against a stable integration SHA before and after each merge.
 9. **Push is denied by default.** Local commit/merge authority does not imply push, release, deployment, primary-branch merge, history rewrite, or worktree deletion authority.
 10. **The governing skill is immutable during a mission.** Record lessons, but propose policy changes only after mission closure and user review.
@@ -118,7 +118,7 @@ When intake is complete, render `templates/mission-intake.md` as one bounded **M
 - focused/broad gates and dashboard policy;
 - inferred values, explicit defaults, and unresolved assumptions.
 
-If no durable controller is active, say explicitly: **“Execution is session-orchestrated; Beads/Herdr preserve recovery state, but after a main-session restart you must run `/conductor resume`.”** Never imply daemonized continuation that does not exist.
+If no durable controller is active, say explicitly: **“Execution is session-orchestrated; Beads/Herdr preserve recovery state, but after a main-session restart you must run `/conductor resume`.”** Never imply daemonized continuation that does not exist. For delegated mode, automatic worker-to-worker continuation is available only while the Conductor pane exists and every active worker has a verified completion-wake handle; disclose that boundary explicitly.
 
 Then say **“Nothing has launched.”** and ask the user to reply exactly:
 
@@ -225,9 +225,9 @@ Use expensive models only for ambiguity and judgment. Prefer Factory Droid’s n
 
 Before dispatch:
 
-1. Query `bd ready --parent "$MISSION_ID" --json`.
-2. Reconcile completed workers before admitting replacements. If fewer than two productive workers are active, inspect all ready and near-ready units for a second disjoint lane; do not stop after selecting the first result returned by `bd ready`. Dispatch it only when process headroom under `maxWorkers`, weighted headroom under `maxWeightedSlots`, workload-class reserves, and live pressure gates all admit both active workloads.
-3. Confirm no overlapping mutating owner or unstable shared seam.
+1. Query `bd ready --parent "$MISSION_ID" --json` (or query all mission children and filter dependency readiness when the installed Beads version lacks `--parent`).
+2. Build a reconciled snapshot containing the complete ready queue, active mission-owned workers, ownership keys, workload costs, budgets, and fresh pressure signals. Run `python3 scripts/scheduler_decision.py snapshot.json`. Treat its `maximize_useful_throughput` selection as the scheduling default; inspect every excluded lane and never stop after selecting the first `bd ready` result.
+3. Reconcile completed workers before admitting replacements. If fewer than two productive workers would be active, require the planner's concrete `underfillReason`; otherwise dispatch every selected lane up to the admitted maximum.
 4. Re-sample global resource pressure before every worker-consuming action, including worktree/workspace opening and overnight dispatch. Read available RAM, `/proc/pressure/memory` `full avg10`, and the `pswpout` delta across `budgets.resourceSampleSeconds`; convert pages with the live system page size to MiB/s.
 5. Require every metric and sampling datum to be present, finite, real (not boolean), and in its valid domain. Missing, malformed, or stale evidence fails closed.
 6. Classify the next workload by an approved `budgets.workloadClasses` profile (`light` / `standard` / `heavy` or another validated class). Do not assume every worker has equal cost. Do not derive a universal worker cap from RAM.
@@ -253,7 +253,9 @@ Atomically claim through Beads before starting a worker. Record:
 
 Create/open Herdr topology only after the claim succeeds. Keep the primary workspace as the project home and pass an explicit `--path` for feature worktrees; the default worktree path is `~/projects/<name>-worktrees/<branch-slug>/` unless the operator overrides it. Never accept Herdr's default path silently. Use a self-contained brief based on `templates/worker-brief.md`. Require the worker to read project instructions and report artifacts, commands, outputs, risks, and next action.
 
-**Completion criterion:** Beads claim, Herdr process/tracked subprocess handle, exact cwd, worktree, branch, and base SHA all cross-reference one another, and the expected agent is visibly ready/working or independently confirmed live.
+For delegated supervision, launch `scripts/watch_worker_completion.py` as a separate mission-owned process after verifying the worker PID/start identity and expected result marker. Record the watcher PID and receipt path, then verify it is live. A generic background wait that exits silently is not sufficient. Never return idle while an active worker is unwatched. On a validated wake, reconcile the worker evidence and Bead immediately, then resample and refill through `scripts/scheduler_decision.py`. Follow `references/speed-first-liveness.md`.
+
+**Completion criterion:** Beads claim, Herdr process/tracked subprocess handle, exact cwd, worktree, branch, base SHA, and—when delegated—the verified completion-wake handle all cross-reference one another, and the expected agent and watcher are independently confirmed live.
 
 ### 6. Supervise without stealing implementation
 
