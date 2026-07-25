@@ -11,6 +11,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+from unittest import mock
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 TOKEN = "a" * 32
@@ -331,6 +332,21 @@ class CompletionWakeTests(unittest.TestCase):
             if len(args) < 3 or args[:2] not in (["pane", "get"], ["pane", "send-text"], ["pane", "send-keys"]):
                 print("unsupported fake herdr command", file=sys.stderr)
                 raise SystemExit(2)
+            required = [pathlib.Path(item) for item in os.environ.get("FAKE_HERDR_REQUIRE", "").split(os.pathsep) if item]
+            if any(not item.exists() for item in required):
+                print("wake attempted before launcher lifecycle completed", file=sys.stderr)
+                raise SystemExit(9)
+            forbidden_pid = os.environ.get("FAKE_HERDR_FORBID_PID")
+            forbidden_ticks = os.environ.get("FAKE_HERDR_FORBID_START_TICKS")
+            if forbidden_pid and forbidden_ticks:
+                try:
+                    raw = pathlib.Path(f"/proc/{forbidden_pid}/stat").read_text()
+                    tail = raw[raw.rfind(")") + 2:].split()
+                    if tail[0] != "Z" and int(tail[19]) == int(forbidden_ticks):
+                        print("wake attempted while exact launcher identity was still live", file=sys.stderr)
+                        raise SystemExit(9)
+                except FileNotFoundError:
+                    pass
             log = pathlib.Path(os.environ["FAKE_HERDR_LOG"])
             rows = json.loads(log.read_text()) if log.exists() else []
             rows.append(args)
@@ -343,7 +359,7 @@ class CompletionWakeTests(unittest.TestCase):
         path.chmod(0o755)
         return path
 
-    def run_watcher(self, root: Path, worker_code: str, marker_value=TOKEN):
+    def run_watcher(self, root: Path, worker_code: str, marker_value=TOKEN, required_wake_files=()):
         result_path = root / "result.json"
         receipt_path = root / "receipt.json"
         log_path = root / "herdr-log.json"
@@ -369,6 +385,9 @@ class CompletionWakeTests(unittest.TestCase):
         ]
         env = os.environ.copy()
         env["FAKE_HERDR_LOG"] = str(log_path)
+        env["FAKE_HERDR_REQUIRE"] = os.pathsep.join(str(path) for path in required_wake_files)
+        env["FAKE_HERDR_FORBID_PID"] = str(worker.pid)
+        env["FAKE_HERDR_FORBID_START_TICKS"] = str(start_ticks)
         started = time.monotonic()
         watcher = subprocess.run(cmd, env=env, text=True, capture_output=True, timeout=8)
         elapsed = time.monotonic() - started
@@ -395,6 +414,83 @@ class CompletionWakeTests(unittest.TestCase):
             calls = json.loads(log.read_text())
             self.assertIn(["pane", "send-text", "w9:p1", data["wakeMessage"]], calls)
             self.assertIn(["pane", "send-keys", "w9:p1", "ENTER"], calls)
+
+    def test_fallback_capable_launcher_is_watched_through_replacement_child(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            failed_done = root / "failed-child-done"
+            replacement_done = root / "replacement-child-done"
+            launcher_exiting = root / "launcher-exiting"
+            launcher_code = textwrap.dedent(f"""\
+                import pathlib, subprocess, sys, time
+                root = pathlib.Path(sys.argv[1]).parent
+                failed = subprocess.run([
+                    sys.executable, '-c',
+                    "import pathlib,sys; pathlib.Path(sys.argv[1]).write_text(str(__import__('os').getpid())); raise SystemExit(73)",
+                    str(root / 'failed-child-done'),
+                ])
+                assert failed.returncode == 73
+                replacement = "import json,os,pathlib,sys,time; result=pathlib.Path(sys.argv[1]); result.write_text(json.dumps({{'completionMarker':'{TOKEN}','status':'PASS'}})); time.sleep(.15); pathlib.Path(sys.argv[2]).write_text(str(os.getpid()))"
+                subprocess.run([sys.executable, '-c', replacement, sys.argv[1], str(root / 'replacement-child-done')], check=True)
+                (root / 'launcher-exiting').write_text('complete')
+                time.sleep(.1)
+            """)
+            required = (failed_done, replacement_done, launcher_exiting)
+            watcher, _, _, receipt, log = self.run_watcher(
+                root,
+                launcher_code,
+                required_wake_files=required,
+            )
+            self.assertEqual(0, watcher.returncode, watcher.stderr)
+            self.assertTrue(all(path.exists() for path in required))
+            self.assertNotEqual(failed_done.read_text(), replacement_done.read_text())
+            data = json.loads(receipt.read_text())
+            self.assertTrue(data["workerExitObserved"])
+            self.assertTrue(data["completionArtifactValidated"])
+            self.assertTrue(data["conductorWakeDelivered"])
+
+    def test_artifact_appearing_during_pidfd_attachment_is_rejected(self):
+        import watch_worker_completion as watcher_module
+
+        if not hasattr(os, "pidfd_open"):
+            self.skipTest("pidfd_open unavailable")
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            result_path = root / "result.json"
+            receipt_path = root / "receipt.json"
+            worker = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(3)"])
+            try:
+                start_ticks = watcher_module.process_start_ticks(worker.pid)
+                assert start_ticks is not None
+                real_pidfd_open = os.pidfd_open
+
+                def racing_pidfd_open(pid):
+                    fd = real_pidfd_open(pid)
+                    result_path.write_text(json.dumps({"completionMarker": TOKEN, "status": "PASS"}))
+                    return fd
+
+                argv = [
+                    "watch_worker_completion.py",
+                    "--worker-pid", str(worker.pid),
+                    "--worker-start-ticks", str(start_ticks),
+                    "--task-id", "attach-race",
+                    "--result-json", str(result_path),
+                    "--marker-key", "completionMarker",
+                    "--marker-value", TOKEN,
+                    "--conductor-pane", "w9:p1",
+                    "--receipt", str(receipt_path),
+                    "--timeout-seconds", "1",
+                ]
+                with mock.patch.object(sys, "argv", argv), mock.patch.object(
+                    watcher_module.os, "pidfd_open", side_effect=racing_pidfd_open
+                ):
+                    self.assertEqual(3, watcher_module.main())
+                receipt = json.loads(receipt_path.read_text())
+                self.assertFalse(receipt["completionArtifactValidated"])
+                self.assertTrue(receipt["manualReconcile"])
+            finally:
+                worker.terminate()
+                worker.wait(timeout=2)
 
     def test_stale_valid_artifact_cannot_wake_without_live_pid_identity(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -426,6 +522,54 @@ class CompletionWakeTests(unittest.TestCase):
             self.assertFalse(data["completionArtifactValidated"])
             self.assertFalse(data["conductorWakeDelivered"])
             self.assertTrue(data["manualReconcile"])
+
+    def test_preexisting_valid_artifact_is_rejected_before_live_attachment(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            result_path = root / "result.json"
+            receipt_path = root / "receipt.json"
+            log_path = root / "herdr-log.json"
+            fake_herdr = self.make_fake_herdr(root)
+            result_path.write_text(json.dumps({"completionMarker": TOKEN, "status": "PASS"}))
+            from watch_worker_completion import process_start_ticks
+
+            worker = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(3)"])
+            try:
+                start_ticks = process_start_ticks(worker.pid)
+                assert start_ticks is not None
+                env = os.environ.copy()
+                env["FAKE_HERDR_LOG"] = str(log_path)
+                watcher = subprocess.run(
+                    [
+                        sys.executable,
+                        str(SCRIPT_DIR / "watch_worker_completion.py"),
+                        "--worker-pid", str(worker.pid),
+                        "--worker-start-ticks", str(start_ticks),
+                        "--task-id", "replay-task",
+                        "--result-json", str(result_path),
+                        "--marker-key", "completionMarker",
+                        "--marker-value", TOKEN,
+                        "--conductor-pane", "w9:p1",
+                        "--receipt", str(receipt_path),
+                        "--herdr-bin", str(fake_herdr),
+                        "--timeout-seconds", "1",
+                    ],
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                    timeout=3,
+                )
+                self.assertEqual(3, watcher.returncode)
+                data = json.loads(receipt_path.read_text())
+                self.assertIn("predates watcher attachment", data["error"])
+                self.assertFalse(data["workerExitObserved"])
+                self.assertFalse(data["completionArtifactValidated"])
+                self.assertFalse(data["conductorWakeDelivered"])
+                self.assertTrue(data["manualReconcile"])
+                self.assertFalse(log_path.exists())
+            finally:
+                worker.terminate()
+                worker.wait(timeout=2)
 
     def test_invalid_artifact_never_wakes_conductor(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -472,6 +616,11 @@ class PolicyContractTests(unittest.TestCase):
         ]
         for phrase in required:
             self.assertIn(phrase, self.reference)
+
+    def test_reference_requires_replay_safe_verified_attachment(self):
+        self.assertIn("must not exist at watcher attachment", self.reference)
+        self.assertIn("after opening the pidfd", self.reference)
+        self.assertIn("manual reconciliation", self.reference)
 
 
 if __name__ == "__main__":

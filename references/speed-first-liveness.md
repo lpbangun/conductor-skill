@@ -38,7 +38,7 @@ The planner is advisory control-plane code: Conductor still verifies claims, pat
 
 ## Completion wake contract
 
-Delegated continuation requires an actual wake path. For every worker, launch a separate watcher process after startup identity is verified:
+Delegated continuation requires an actual wake path. For every worker, launch a separate watcher process after the full-attempt lifecycle identity is verified. `WORKER_PID` below means the stable process whose lifetime covers every mutating provider attempt: a direct worker PID for a direct launch, or the launcher PID for a fallback-capable wrapper. Never bind to the first provider child when the launcher may replace it after 401, 429, timeout, or another retryable failure:
 
 ```bash
 python3 scripts/watch_worker_completion.py \
@@ -52,11 +52,11 @@ python3 scripts/watch_worker_completion.py \
   --receipt "$MISSION_DIR/watchers/$TASK_ID.json"
 ```
 
-Record the watcher PID, exact worker identity, exact per-attempt artifact path, dispatch-unique completion token, conductor pane, and receipt path in Beads. Generate the token with at least 128 bits of randomness (for example `secrets.token_hex(16)`), place it in the worker brief, and never reuse it across retries or tasks. The watcher accepts only a hexadecimal token of at least 32 characters. Verify the watcher process is live before the Conductor turn may become idle.
+Record the watcher PID, exact lifecycle identity, launcher command, actual accepted provider/model after fallback, exact per-attempt artifact path, dispatch-unique completion token, conductor pane, and receipt path in Beads. Generate the token with at least 128 bits of randomness (for example `secrets.token_hex(16)`), place it in the worker brief, and never reuse it across retries or tasks. The watcher accepts only a hexadecimal token of at least 32 characters. The per-attempt result path must not exist at watcher attachment; any pre-existing file or symlink is replay/ambiguous evidence and requires manual reconciliation. On pidfd-capable hosts, verify PID/start-ticks identity again after opening the pidfd so PID reuse cannot cross the check/open boundary. Verify the watcher process is live before the Conductor turn may become idle. A receipt bound to a replaced child PID is non-qualifying even if the eventual fallback writes the expected artifact; its exit timestamp and latency do not describe end-to-end completion.
 
 The watcher:
 
-1. blocks on the external worker process, using Linux pidfd when available;
+1. blocks on the external full-attempt lifecycle process, using Linux pidfd when available;
 2. never creates or edits worker result evidence;
 3. validates the worker-created completion artifact and exact marker;
 4. verifies the actual Conductor pane exists;

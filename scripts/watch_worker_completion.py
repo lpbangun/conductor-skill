@@ -55,31 +55,29 @@ def process_start_ticks(pid: int) -> int | None:
         return None
 
 
-def wait_for_exit(pid: int, expected_start_ticks: int | None, deadline: float) -> bool:
-    """Block on Linux pidfd when available; use bounded adaptive fallback."""
+def wait_for_exit(
+    pid: int,
+    expected_start_ticks: int,
+    deadline: float,
+    attached_pidfd: int | None = None,
+) -> bool:
+    """Block on a verified pidfd when available; use bounded identity polling otherwise."""
+    if attached_pidfd is not None:
+        poller = select.poll()
+        poller.register(attached_pidfd, select.POLLIN)
+        remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
+        return bool(poller.poll(remaining_ms))
+
     current = process_start_ticks(pid)
     if current is None:
         return True
-    if expected_start_ticks is not None and current != expected_start_ticks:
+    if current != expected_start_ticks:
         return True
-
-    if hasattr(os, "pidfd_open"):
-        try:
-            fd = os.pidfd_open(pid)
-            try:
-                poller = select.poll()
-                poller.register(fd, select.POLLIN)
-                remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
-                return bool(poller.poll(remaining_ms))
-            finally:
-                os.close(fd)
-        except OSError:
-            pass
 
     delay = 0.05
     while time.monotonic() < deadline:
         current = process_start_ticks(pid)
-        if current is None or (expected_start_ticks is not None and current != expected_start_ticks):
+        if current is None or current != expected_start_ticks:
             return True
         time.sleep(min(delay, max(0.0, deadline - time.monotonic())))
         delay = min(delay * 1.7, 1.0)
@@ -163,6 +161,12 @@ def main() -> int:
         atomic_json(args.receipt, receipt)
         return 2
 
+    if os.path.lexists(args.result_json):
+        receipt["error"] = "completion artifact predates watcher attachment"
+        receipt["manualReconcile"] = True
+        atomic_json(args.receipt, receipt)
+        return 3
+
     observed_start_ticks = process_start_ticks(args.worker_pid)
     if observed_start_ticks is None or observed_start_ticks != args.worker_start_ticks:
         receipt["error"] = "worker PID identity mismatch or worker not live at watcher startup"
@@ -172,8 +176,42 @@ def main() -> int:
     expected_ticks = args.worker_start_ticks
     receipt["workerStartTicks"] = expected_ticks
 
+    attached_pidfd: int | None = None
+    if hasattr(os, "pidfd_open"):
+        try:
+            attached_pidfd = os.pidfd_open(args.worker_pid)
+        except OSError:
+            # A process can exit between the initial identity read and pidfd_open.
+            # Fail closed if its exact identity is no longer observable; otherwise
+            # the bounded start-ticks polling fallback remains safe.
+            if process_start_ticks(args.worker_pid) != expected_ticks:
+                receipt["error"] = "worker exited or changed identity during watcher attachment"
+                receipt["manualReconcile"] = True
+                atomic_json(args.receipt, receipt)
+                return 3
+        else:
+            if process_start_ticks(args.worker_pid) != expected_ticks:
+                os.close(attached_pidfd)
+                receipt["error"] = "worker exited or changed identity after pidfd attachment"
+                receipt["manualReconcile"] = True
+                atomic_json(args.receipt, receipt)
+                return 3
+
+    if os.path.lexists(args.result_json):
+        if attached_pidfd is not None:
+            os.close(attached_pidfd)
+        receipt["error"] = "completion artifact appeared during watcher attachment"
+        receipt["manualReconcile"] = True
+        atomic_json(args.receipt, receipt)
+        return 3
+
     deadline = started_monotonic + args.timeout_seconds
-    if not wait_for_exit(args.worker_pid, expected_ticks, deadline):
+    try:
+        exited = wait_for_exit(args.worker_pid, expected_ticks, deadline, attached_pidfd)
+    finally:
+        if attached_pidfd is not None:
+            os.close(attached_pidfd)
+    if not exited:
         receipt["error"] = "worker completion timeout"
         receipt["manualReconcile"] = True
         atomic_json(args.receipt, receipt)

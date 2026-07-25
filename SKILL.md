@@ -1,7 +1,7 @@
 ---
 name: conductor
 description: "Use when the user authorizes a multi-step software mission that should continue autonomously across workers, worktrees, reviews, integration gates, failures, or session restarts. Orchestrates Beads as the durable ledger and Herdr as the execution surface with risk-proportional routing, evidence-backed transitions, resource admission, stale-claim recovery, and explicit human boundaries. Do not use for a single bounded task or strategy discussion without execution approval."
-version: 1.4.1
+version: 1.4.2
 author: Hermes Agent
 license: MIT
 platforms: [linux]
@@ -253,7 +253,7 @@ Atomically claim through Beads before starting a worker. Record:
 
 Create/open Herdr topology only after the claim succeeds. Keep the primary workspace as the project home and pass an explicit `--path` for feature worktrees; the default worktree path is `~/projects/<name>-worktrees/<branch-slug>/` unless the operator overrides it. Never accept Herdr's default path silently. Use a self-contained brief based on `templates/worker-brief.md`. Require the worker to read project instructions and report artifacts, commands, outputs, risks, and next action.
 
-For delegated supervision, launch `scripts/watch_worker_completion.py` as a separate mission-owned process after verifying the worker PID/start identity and expected result marker. Record the watcher PID and receipt path, then verify it is live. A generic background wait that exits silently is not sufficient. Never return idle while an active worker is unwatched. On a validated wake, reconcile the worker evidence and Bead immediately, then resample and refill through `scripts/scheduler_decision.py`. Follow `references/speed-first-liveness.md`.
+For delegated supervision, launch `scripts/watch_worker_completion.py` as a separate mission-owned process after verifying the lifecycle PID/start identity and expected result marker. The lifecycle PID must cover the whole mutating attempt. For a direct worker command it is the worker PID; for a fallback-capable launcher such as `spawn_agent.py`, it is the stable launcher PID, never the first provider child that may exit before a replacement child starts. Record the launcher/worker PID, start ticks, actual accepted provider/model, watcher PID, and receipt path, then verify the watcher is live. A generic background wait that exits silently is not sufficient. Never return idle while an active worker is unwatched. Do not claim completion latency from a replaced child PID. On a validated wake after the lifecycle process exits, reconcile the worker evidence and Bead immediately, then resample and refill through `scripts/scheduler_decision.py`. Follow `references/speed-first-liveness.md`.
 
 **Completion criterion:** Beads claim, Herdr process/tracked subprocess handle, exact cwd, worktree, branch, base SHA, and—when delegated—the verified completion-wake handle all cross-reference one another, and the expected agent and watcher are independently confirmed live.
 
