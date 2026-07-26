@@ -129,6 +129,11 @@ def main() -> int:
     parser.add_argument("--marker-key", required=True)
     parser.add_argument("--marker-value", required=True)
     parser.add_argument("--conductor-pane", required=True)
+    parser.add_argument(
+        "--conductor-session",
+        default="",
+        help="Controller Hermes session ID bound at launch; required for idle-watchdog qualification.",
+    )
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--herdr-bin", default="herdr")
     parser.add_argument("--timeout-seconds", type=float, default=7200.0)

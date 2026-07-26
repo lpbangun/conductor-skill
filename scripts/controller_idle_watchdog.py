@@ -23,10 +23,14 @@ from typing import Any
 
 PANE_RE = re.compile(r"^[A-Za-z0-9_-]+:p[A-Za-z0-9_-]+$")
 LEDGER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+TOKEN_RE = re.compile(r"^[0-9a-fA-F]{32,}$")
 IDLE_CONTROLLER_STATES = {"idle", "done"}
 WORKING_CONTROLLER_STATES = {"working", "busy", "running", "processing"}
 COMMAND_TIMEOUT_SECONDS = 15
 WATCHDOG_VERSION = "1.5.0"
+MAX_INTERVAL_SECONDS = 86400.0
+MAX_MIN_REPEAT_SECONDS = 86400.0
+EXPECTED_WATCHER_SCRIPT = str(Path(__file__).resolve().parent / "watch_worker_completion.py")
 
 
 def run_json(argv: list[str], *, cwd: Path | None = None) -> Any:
@@ -81,8 +85,7 @@ def mission_is_active(repo: Path, mission_id: str) -> bool:
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"cannot read active mission contract: {path}") from exc
     mission = data.get("mission") if isinstance(data, dict) else None
-    nested_status = mission.get("status") if isinstance(mission, dict) else None
-    status = nested_status or (data.get("status") if isinstance(data, dict) else None)
+    status = mission.get("status") if isinstance(mission, dict) else None
     if not (isinstance(status, str) and status.lower() == "active"):
         return False
     ledger = data.get("ledger") if isinstance(data, dict) else None
@@ -137,7 +140,40 @@ def flag(argv: list[str], name: str) -> str | None:
     return argv[index + 1] if index + 1 < len(argv) else None
 
 
-def scan_watchers(proc_root: Path) -> list[dict[str, Any]]:
+def valid_completion_token(value: Any) -> bool:
+    return isinstance(value, str) and TOKEN_RE.fullmatch(value) is not None
+
+
+def exact_absolute_path(value: Any) -> str | None:
+    """Require an exact absolute lexical path. Relative paths and control chars fail closed."""
+    if not isinstance(value, str) or not value:
+        return None
+    if any(ord(char) < 32 for char in value):
+        return None
+    if not value.startswith("/"):
+        return None
+    try:
+        path = Path(value)
+    except (TypeError, ValueError):
+        return None
+    if not path.is_absolute():
+        return None
+    # Preserve absolute form without symlink resolution; reject empties after normpath edge cases.
+    normalized = os.path.normpath(value)
+    if not normalized.startswith("/"):
+        return None
+    return normalized
+
+
+def is_expected_watcher_argv(argv: list[str], expected_script: str) -> bool:
+    return bool(argv) and (
+        argv[0] == expected_script or (len(argv) > 1 and argv[1] == expected_script)
+    )
+
+
+def scan_watchers(
+    proc_root: Path, *, expected_script: str = EXPECTED_WATCHER_SCRIPT
+) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = []
     try:
         entries = list(proc_root.iterdir())
@@ -146,21 +182,23 @@ def scan_watchers(proc_root: Path) -> list[dict[str, Any]]:
     for entry in entries:
         if not entry.name.isdigit():
             continue
+        pid = int(entry.name)
+        # Bracket cmdline with start-tick reads so the inspected argv belongs to this identity.
+        ticks_before = read_start_ticks(proc_root, pid)
+        if ticks_before is None:
+            continue
         try:
             raw = (entry / "cmdline").read_bytes()
         except OSError:
             continue
-        argv = [part.decode(errors="replace") for part in raw.split(b"\0") if part]
-        direct_script = bool(argv and Path(argv[0]).name == "watch_worker_completion.py")
-        python_script = bool(len(argv) > 1 and Path(argv[1]).name == "watch_worker_completion.py")
-        if not (direct_script or python_script):
+        ticks_after = read_start_ticks(proc_root, pid)
+        if ticks_after is None:
             continue
-        watcher_ticks_before = read_start_ticks(proc_root, int(entry.name))
-        if watcher_ticks_before is None:
-            raise RuntimeError("completion watcher process identity is unreadable")
-        watcher_ticks_after = read_start_ticks(proc_root, int(entry.name))
-        if watcher_ticks_after != watcher_ticks_before:
+        if ticks_after != ticks_before:
             raise RuntimeError("completion watcher process identity changed during inspection")
+        argv = [part.decode(errors="replace") for part in raw.split(b"\0") if part]
+        if not is_expected_watcher_argv(argv, expected_script):
+            continue
         worker_pid_text = flag(argv, "--worker-pid")
         worker_ticks_text = flag(argv, "--worker-start-ticks")
         try:
@@ -171,6 +209,7 @@ def scan_watchers(proc_root: Path) -> list[dict[str, Any]]:
         required = {
             "taskId": flag(argv, "--task-id"),
             "pane": flag(argv, "--conductor-pane"),
+            "sessionId": flag(argv, "--conductor-session"),
             "resultJson": flag(argv, "--result-json"),
             "markerValue": flag(argv, "--marker-value"),
             "receipt": flag(argv, "--receipt"),
@@ -179,8 +218,9 @@ def scan_watchers(proc_root: Path) -> list[dict[str, Any]]:
             raise RuntimeError("completion watcher is missing required identity arguments")
         found.append(
             {
-                "pid": int(entry.name),
-                "startTicks": watcher_ticks_after,
+                "pid": pid,
+                "startTicks": ticks_after,
+                "script": expected_script,
                 **required,
                 "workerPid": worker_pid,
                 "workerStartTicks": worker_ticks,
@@ -194,53 +234,55 @@ def scan_watchers(proc_root: Path) -> list[dict[str, Any]]:
     return found
 
 
-def exact_absolute_path(repo: Path, value: Any) -> str | None:
-    if not isinstance(value, str) or not value:
-        return None
-    if any(ord(char) < 32 for char in value):
-        return None
-    path = Path(value)
-    if not path.is_absolute():
-        path = repo / path
-    return os.path.abspath(path)
-
-
-def qualified_watcher_tasks(repo: Path, pane: str, tasks: list[Any], watchers: list[dict[str, Any]]) -> set[str]:
+def qualified_watcher_tasks(
+    pane: str,
+    session_id: str,
+    tasks: list[Any],
+    watchers: list[dict[str, Any]],
+) -> set[str]:
     expected: dict[str, dict[str, Any]] = {}
     for task in tasks:
         tid = task_id(task)
         if not tid:
             continue
         md = metadata(task)
+        session = md.get("conductor_session", md.get("controller_session"))
         expected[tid] = {
-            "resultJson": exact_absolute_path(repo, md.get("result_json")),
+            "resultJson": exact_absolute_path(md.get("result_json")),
             "watcherPid": md.get("watcher_pid"),
             "watcherStartTicks": md.get("watcher_start_ticks"),
             "workerPid": md.get("process_pid", md.get("worker_pid")),
             "workerStartTicks": md.get("process_start_ticks", md.get("worker_start_ticks")),
             "markerValue": md.get("completion_token"),
-            "receipt": exact_absolute_path(repo, md.get("watcher_receipt")),
+            "receipt": exact_absolute_path(md.get("watcher_receipt")),
             "pane": md.get("conductor_pane"),
+            "sessionId": session if isinstance(session, str) else None,
         }
     qualified: set[str] = set()
     for watcher in watchers:
         tid = watcher.get("taskId")
-        watched_path = exact_absolute_path(repo, watcher.get("resultJson"))
-        watched_receipt = exact_absolute_path(repo, watcher.get("receipt"))
+        watched_path = exact_absolute_path(watcher.get("resultJson"))
+        watched_receipt = exact_absolute_path(watcher.get("receipt"))
         want = expected.get(tid) if isinstance(tid, str) else None
+        token = want.get("markerValue") if isinstance(want, dict) else None
         if (
             isinstance(tid, str)
             and isinstance(want, dict)
             and watcher.get("pane") == pane
             and want.get("pane") == pane
+            and watcher.get("sessionId") == session_id
+            and want.get("sessionId") == session_id
             and watcher.get("workerLive") is True
             and watcher.get("pid") == want.get("watcherPid")
             and watcher.get("startTicks") == want.get("watcherStartTicks")
             and watcher.get("workerPid") == want.get("workerPid")
             and watcher.get("workerStartTicks") == want.get("workerStartTicks")
-            and watcher.get("markerValue") == want.get("markerValue")
-            and isinstance(want.get("markerValue"), str)
+            and valid_completion_token(token)
+            and watcher.get("markerValue") == token
+            and watched_receipt is not None
+            and want.get("receipt") is not None
             and watched_receipt == want.get("receipt")
+            and watched_path is not None
             and want.get("resultJson") is not None
             and watched_path == want.get("resultJson")
         ):
@@ -287,6 +329,22 @@ def fingerprint(reason: str, ready: list[str], in_progress: list[str], qualified
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def validate_timing_args(interval_seconds: float, min_repeat_seconds: float) -> str | None:
+    if not isinstance(interval_seconds, (int, float)) or isinstance(interval_seconds, bool):
+        return "interval must be a finite positive number"
+    if not isinstance(min_repeat_seconds, (int, float)) or isinstance(min_repeat_seconds, bool):
+        return "minimum repeat must be a finite non-negative number"
+    if not math.isfinite(interval_seconds) or interval_seconds <= 0 or interval_seconds > MAX_INTERVAL_SECONDS:
+        return "interval must be a finite positive number within 86400 seconds"
+    if (
+        not math.isfinite(min_repeat_seconds)
+        or min_repeat_seconds < 0
+        or min_repeat_seconds > MAX_MIN_REPEAT_SECONDS
+    ):
+        return "minimum repeat must be a finite non-negative number within 86400 seconds"
+    return None
+
+
 def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     repo = Path(args.repo).resolve()
     if not mission_is_active(repo, args.mission_id):
@@ -313,8 +371,9 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         tid for task in tasks
         if isinstance(task, dict) and task.get("status") == "in_progress" and (tid := task_id(task))
     )
-    watchers = scan_watchers(Path(args.proc_root))
-    qualified = qualified_watcher_tasks(repo, args.pane, tasks, watchers)
+    expected_script = getattr(args, "expected_watcher_script", EXPECTED_WATCHER_SCRIPT)
+    watchers = scan_watchers(Path(args.proc_root), expected_script=expected_script)
+    qualified = qualified_watcher_tasks(args.pane, args.session_id, tasks, watchers)
 
     if ready:
         reason = "ready_without_live_watcher"
@@ -375,10 +434,9 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             "reason": "controller_changed_before_wake",
             "controllerStatus": pre_submit_status,
         }
-    try:
-        run_command([args.herdr_bin, "pane", "run", args.pane, message])
-    except RuntimeError as exc:
-        return 1, {"wakeDelivered": False, "reason": "wake_submission_failed", "error": str(exc)}
+
+    # Persist throttle before the external side effect so a later state-write
+    # failure cannot re-enable an unlimited wake storm for this frontier.
     submitted_at = time.time()
     state_payload = {
         "version": WATCHDOG_VERSION,
@@ -389,8 +447,34 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         "lastWakeAt": submitted_at,
         "reason": reason,
         "acknowledged": False,
+        "submitPhase": "pending",
     }
-    save_state(Path(args.state), state_payload)
+    try:
+        save_state(Path(args.state), state_payload)
+    except OSError as exc:
+        return 1, {
+            "wakeDelivered": False,
+            "reason": "wake_state_persist_failed",
+            "error": str(exc),
+        }
+
+    try:
+        run_command([args.herdr_bin, "pane", "run", args.pane, message])
+    except RuntimeError as exc:
+        return 1, {"wakeDelivered": False, "reason": "wake_submission_failed", "error": str(exc)}
+
+    state_payload["submitPhase"] = "submitted"
+    try:
+        save_state(Path(args.state), state_payload)
+    except OSError as exc:
+        # Throttling already durable from the pending write; surface the failure.
+        return 1, {
+            "wakeDelivered": False,
+            "reason": "wake_state_persist_failed_after_submit",
+            "error": str(exc),
+            "throttleEstablished": True,
+        }
+
     try:
         accepted_status = wait_for_working_status(
             args.herdr_bin, args.pane, repo, args.session_id
@@ -404,7 +488,16 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             "controllerStatus": accepted_status,
         }
     state_payload["acknowledged"] = True
-    save_state(Path(args.state), state_payload)
+    try:
+        save_state(Path(args.state), state_payload)
+    except OSError as exc:
+        return 1, {
+            "wakeDelivered": False,
+            "reason": "wake_ack_state_persist_failed",
+            "error": str(exc),
+            "controllerStatus": accepted_status,
+            "throttleEstablished": True,
+        }
     return 0, {
         "wakeDelivered": True,
         "reason": reason,
@@ -435,6 +528,11 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--proc-root", default="/proc")
     p.add_argument("--herdr-bin", default="herdr")
     p.add_argument("--bd-bin", default="bd")
+    p.add_argument(
+        "--expected-watcher-script",
+        default=EXPECTED_WATCHER_SCRIPT,
+        help=argparse.SUPPRESS,
+    )
     p.add_argument("--once", action="store_true")
     return p
 
@@ -465,8 +563,10 @@ def run_loop(
 
 def main() -> int:
     args = parser().parse_args()
-    if args.interval_seconds <= 0 or args.min_repeat_seconds < 0:
-        parser().error("interval must be positive and minimum repeat must be non-negative")
+    timing_error = validate_timing_args(args.interval_seconds, args.min_repeat_seconds)
+    if timing_error:
+        parser().error(timing_error)
+    args.expected_watcher_script = str(Path(args.expected_watcher_script))
     try:
         lock_fd = acquire_instance_lock(Path(args.repo), args.mission_id)
     except RuntimeError as exc:
