@@ -72,8 +72,8 @@ Authority does not transit: local commit ≠ merge, merge ≠ push, push ≠ rel
   - `minAvailableRamGb`: available-RAM reserve required before admitting that class (template: 1.0 / 2.0 / 4.0).
   Unknown class fields are rejected. Additional named classes are allowed when they use the same field shape.
 - `staleAfterMinutes`: age that makes a claim a recovery candidate, never automatic proof of death.
-- `maxRetriesPerTask`: dispatch/recovery retries before escalation.
-- `maxCorrectionCycles`: implementer↔reviewer cycles before escalation.
+- `maxRetriesPerTask`: total dispatch/recovery retries before the contract's human circuit breaker.
+- `maxCorrectionCycles`: total implementer↔reviewer cycles before the contract's human circuit breaker. For delegated long missions, propose 5 by default and disclose it in preview. After a second materially similar FAIL, Conductor must automatically change strategy while still below this cap; see `correction-convergence.md`.
 - `maxFullSuites`: broad-suite budget for the milestone.
 
 Budgets are circuit breakers, not completion targets. Record each task's `resource_class` / `weighted_slots` / `ram_reserve_gb` in Beads metadata from the approved class profile.

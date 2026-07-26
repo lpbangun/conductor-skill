@@ -1,7 +1,7 @@
 ---
 name: conductor
 description: "Use when the user authorizes a multi-step software mission that should continue autonomously across workers, worktrees, reviews, integration gates, failures, or session restarts. Orchestrates Beads as the durable ledger and Herdr as the execution surface with risk-proportional routing, evidence-backed transitions, resource admission, stale-claim recovery, and explicit human boundaries. Do not use for a single bounded task or strategy discussion without execution approval."
-version: 1.4.2
+version: 1.5.0
 author: Hermes Agent
 license: MIT
 platforms: [linux]
@@ -16,7 +16,7 @@ metadata:
 
 ## Overview
 
-Conductor is a thin policy layer for durable software missions. It does not code, run a scheduler daemon, own a process registry, or replace Git, Beads, or Herdr.
+Conductor is a thin policy layer for durable software missions. It does not code, own a scheduler daemon or process registry, or replace Git, Beads, or Herdr. For delegated missions it bundles a transparent timer-based idle wake guard; that guard has no scheduling or ledger authority.
 
 - **Beads (`bd`)** owns mission/task state, dependencies, atomic claims, metadata, and recovery history.
 - **Herdr** owns human-visible workspaces, panes, agent processes, terminal evidence, and worktree placement.
@@ -55,7 +55,7 @@ Do not use for:
 2. **Conductor does not implement.** Delegate mutating product work to a bounded worker. The conductor may perform deterministic control-plane operations after verified PASS: update Beads, inspect state, create approved worktrees, run predetermined gates, commit already-reviewed changes when explicitly assigned as integration owner, merge without rebase, update the dashboard, and clean up owned resources.
 3. **Evidence beats self-report.** A worker’s “done” is a signal to inspect, never proof. Verify the exact worktree, branch, diff, SHA, commands, exit codes, review verdict, and integrated-base result.
 4. **One mutating owner per worktree.** Parallel mutation requires separate branches/worktrees. Shared integration files have one named owner.
-5. **No hidden runtime.** Do not create a second database, scheduler daemon, merge queue, or process registry. Shell directly to `bd --json` and Herdr’s live CLI. A transparent mission-owned one-shot completion notifier is allowed only as defined in `references/speed-first-liveness.md`; it owns no state and performs no reconciliation.
+5. **No hidden authority.** Do not create a second database, scheduler, merge queue, or process registry. Shell directly to `bd --json` and Herdr’s live CLI. Delegated missions use two transparent mission-owned liveness processes defined in `references/speed-first-liveness.md`: one completion watcher per worker and one controller idle watchdog per dedicated pane. They may observe state and wake the sole controller, but they must not claim tasks, mutate Beads/Git, choose work, run tests, or run `scheduler_decision.py`.
 6. **Risk is not priority.** Beads priority P0–P4 means urgency. Store execution risk independently as `risk:routine`, `risk:standard`, or `risk:critical` labels plus metadata.
 7. **Speed-first, work-conserving, and parallelism-targeted.** Useful throughput is the scheduling objective. Resource policy is an admission constraint and circuit breaker, not the optimization target. Use `scripts/scheduler_decision.py` over the complete ready queue and launch the largest admitted set of productive, dependency-ready, non-overlapping lanes. Feasibility includes process headroom under `maxWorkers` and weighted headroom under `maxWeightedSlots`; when two fit, target at least two productive mission-owned workers. Do not fill the second lane with duplicate verification, speculative work, or shared-seam contention. Do not fill additional capacity with those substitutes either; when fewer than two productive lanes run, record the concrete dependency, ownership, capacity, or pressure reason.
 8. **Integration is serialized.** Never run concurrent merges, pushes, or duplicate full suites. Reconcile against a stable integration SHA before and after each merge.
@@ -92,7 +92,7 @@ enter **intake mode only**. Do not initialize Beads, write a mission contract, c
    - supervision mode (`interactive`, `checkpointed`, or `delegated`);
    - local integration authority and exact target;
    - push authority and exact target.
-4. Default to `checkpointed`, a workload-aware capacity proposal derived from live host signals and approved `workloadClasses` (template `maxWeightedSlots: 3.0` with `light`/`standard`/`heavy`), emergency `maxWorkers: 3` process ceiling (not proof that capacity is available), no local integration, no push, no release/deploy, and preservation of branches/worktrees. Do not derive a universal worker cap from RAM. Label every default so the user can override it; live resource admission still governs every launch.
+4. Default to `checkpointed`, a workload-aware capacity proposal derived from live host signals and approved `workloadClasses` (template `maxWeightedSlots: 3.0` with `light`/`standard`/`heavy`), emergency `maxWorkers: 3` process ceiling (not proof that capacity is available), `maxCorrectionCycles: 5` for delegated long missions, no local integration, no push, no release/deploy, and preservation of branches/worktrees. After two materially similar correction failures, escalate execution strategy automatically rather than asking the user while below the approved total cap. Do not derive a universal worker cap from RAM. Label every default so the user can override it; live resource admission still governs every launch.
 5. Ask no more than four concise questions at once. Do not ask for repository facts, test commands, or system state that tools can discover.
 
 End the intake response with: **“Nothing has launched.”**
@@ -118,7 +118,7 @@ When intake is complete, render `templates/mission-intake.md` as one bounded **M
 - focused/broad gates and dashboard policy;
 - inferred values, explicit defaults, and unresolved assumptions.
 
-If no durable controller is active, say explicitly: **“Execution is session-orchestrated; Beads/Herdr preserve recovery state, but after a main-session restart you must run `/conductor resume`.”** Never imply daemonized continuation that does not exist. For delegated mode, automatic worker-to-worker continuation is available only while the Conductor pane exists and every active worker has a verified completion-wake handle; disclose that boundary explicitly.
+If no durable controller is active, say explicitly: **“Execution is session-orchestrated; Beads/Herdr preserve recovery state, but after a main-session restart you must run `/conductor resume`.”** For delegated mode, automatic continuation is available only while the dedicated Conductor pane and its verified idle watchdog remain live and every active worker has a verified completion-wake handle bound to the current pane and canonical result path; disclose that boundary explicitly.
 
 Then say **“Nothing has launched.”** and ask the user to reply exactly:
 
@@ -253,7 +253,9 @@ Atomically claim through Beads before starting a worker. Record:
 
 Create/open Herdr topology only after the claim succeeds. Keep the primary workspace as the project home and pass an explicit `--path` for feature worktrees; the default worktree path is `~/projects/<name>-worktrees/<branch-slug>/` unless the operator overrides it. Never accept Herdr's default path silently. Use a self-contained brief based on `templates/worker-brief.md`. Require the worker to read project instructions and report artifacts, commands, outputs, risks, and next action.
 
-For delegated supervision, launch `scripts/watch_worker_completion.py` as a separate mission-owned process after verifying the lifecycle PID/start identity and expected result marker. The lifecycle PID must cover the whole mutating attempt. For a direct worker command it is the worker PID; for a fallback-capable launcher such as `spawn_agent.py`, it is the stable launcher PID, never the first provider child that may exit before a replacement child starts. Record the launcher/worker PID, start ticks, actual accepted provider/model, watcher PID, and receipt path, then verify the watcher is live. A generic background wait that exits silently is not sufficient. Never return idle while an active worker is unwatched. Do not claim completion latency from a replaced child PID. On a validated wake after the lifecycle process exits, reconcile the worker evidence and Bead immediately, then resample and refill through `scripts/scheduler_decision.py`. Follow `references/speed-first-liveness.md`.
+For delegated supervision, first launch exactly one `scripts/controller_idle_watchdog.py` as a tracked mission-owned process for the dedicated controller pane and require verified live state. Bind `--session-id` to the current Hermes `agent_session` from `herdr pane get`; verify the pane agent is Hermes and its controller cwd equals the mission repo before launch and every wake. Use a 30-second observation interval and a 90-second same-frontier wake cooldown unless the approved contract names stricter values. Record its PID, PID start ticks, pane, mission ID, state path, command, and loaded Conductor version. The watchdog is a wake transport, not a second controller: it must not claim or close Beads, mutate Git/worktrees, select tasks, run tests, and must not run `scheduler_decision.py`. The dedicated Conductor remains the sole control-plane authority. If the watchdog exits unexpectedly, delegated continuation is unavailable until it is safely recreated.
+
+Then launch `scripts/watch_worker_completion.py` as a separate mission-owned process for each worker after verifying the lifecycle PID/start identity, expected result marker, **the actual result-artifact path the worker was instructed to write**, and the currently active controller pane destination. Never assume worker and control worktrees share `.hermes/conductor/results`: standardize the artifact path in the brief, or explicitly configure the watcher for the worker-worktree path; if a completed artifact is found only in the worker worktree, retire the mismatched watcher, inspect and copy/recover the exact artifact into durable control evidence, then review from the candidate SHA. Never copy a destination pane ID from a previous controller/session: verify the target pane exists and belongs to the current sole controller immediately before launch, record it in Beads, and replace/retire any watcher when controller handoff changes that destination. The lifecycle PID must cover the whole mutating attempt. For a direct worker command it is the worker PID; for a fallback-capable launcher such as `spawn_agent.py`, it is the stable launcher PID, never the first provider child that may exit before a replacement child starts. Record the launcher/worker PID, start ticks, actual accepted provider/model, watcher PID, and receipt path, then verify the watcher is live. A generic background wait that exits silently is not sufficient. Never return idle while an active worker is unwatched. Do not claim completion latency from a replaced child PID. On a validated wake after the lifecycle process exits, reconcile the worker evidence and Bead immediately, then resample and refill through `scripts/scheduler_decision.py`. Follow `references/speed-first-liveness.md`.
 
 **Completion criterion:** Beads claim, Herdr process/tracked subprocess handle, exact cwd, worktree, branch, base SHA, and—when delegated—the verified completion-wake handle all cross-reference one another, and the expected agent and watcher are independently confirmed live.
 
@@ -263,11 +265,28 @@ At material transitions, inspect live evidence. For a lane that stalls:
 
 `inspect → steer once → retry/split/fallback within budget → mark blocked/escalate`
 
-Do not repeatedly resend prompts, infer failure from one watcher timeout, or reclaim from lease expiry alone. Keep scheduling unrelated ready work.
+A correction failure triggers diagnosis, not automatic human interruption. After a second materially similar review FAIL, automatically change an in-envelope strategy dimension—model/provider route, implementer, reviewer, decomposition, focused reproduction, invariant test, or ownership slice—before another attempt. Continue strategy-escalated corrections while below the approved `maxCorrectionCycles` and while progress/resource evidence remains sound. Only exhaustion of the approved total cap, absence of any materially different in-envelope strategy, or another explicit authority/cost/safety boundary requires the user.
+
+Do not repeatedly resend prompts, infer failure from one watcher timeout, or reclaim from lease expiry alone. Keep scheduling unrelated ready work. Follow `references/correction-convergence.md` for finding fingerprints, no-progress detection, evidence, and human-boundary rules.
 
 A heartbeat is a compact metadata update, not prose chatter. Refresh it after observable progress, a test/review transition, or bounded supervision interval. Do not use heartbeats to conceal a worker that is idle at a prompt.
 
-**Completion criterion:** each active task has fresh, truthful state; blocked tasks name the blocker and recovery owner; unrelated ready work continues when safe.
+**Completion criterion:** each active lane is progressing, safely waiting on an explicit gate, or has one recorded recovery action; unrelated ready work continues.
+
+### 6a. Pre-final continuation guard
+
+Before emitting any final response during an active delegated mission, reconcile the current pane, mission status, Beads ready frontier, active workers, qualified completion watchers, and idle-watchdog process. A checkpoint-only final is forbidden when authorized work can continue.
+
+The controller may return idle only when at least one condition is proven:
+
+- the mission or approved milestone is complete;
+- an explicit human authority/safety/cost boundary requires a decision, no unrelated safe work remains, the exact boundary is durable, and `mission.status` has transitioned away from `active`;
+- every unfinished lane is dependency/ownership/resource blocked and the exact blocker is durable;
+- productive workers are live and every one has a qualified watcher bound to the current pane and actual result path.
+
+If the ready frontier is non-empty and no qualified productive worker already covers it, continue in the same turn: sample resources, run `scripts/scheduler_decision.py`, claim atomically, and dispatch/refill. Never end with only “task X is ready next.” The idle watchdog is recovery for model-turn failure, not permission to stop at routine checkpoints.
+
+**Completion criterion:** every active-mission final response names the proven idle condition; otherwise the controller remains working and advances the loop.
 
 ### 7. Verify, review, and correct
 
@@ -280,11 +299,11 @@ Before review, independently inspect:
 - acceptance criteria mapping;
 - prohibited scope changes.
 
-Verification must be change-proportional: metadata-only changes, ignored local mission artifacts, or an unchanged product SHA must not trigger a broad suite. Validate the changed metadata/schema directly and reuse still-bound exact-SHA product evidence. Run a broad suite only when its declared product tree or broad acceptance surface changed, or when a concrete unresolved failure requires it.
+Verification must be change-proportional: metadata-only changes, ignored local mission artifacts, or an unchanged product SHA must not trigger a broad suite. Validate the changed metadata/schema directly and reuse still-bound exact-SHA product evidence. Run a broad suite only when its declared product tree or broad acceptance surface changed, or when a concrete unresolved failure requires it. Treat broad-suite capacity as reserved gate authority, not one undifferentiated counter: track accidental/forbidden worker runs separately from authorized gate slots and never let a worker violation silently consume the required final integrated gate. Follow `references/verification-scope-and-budget-discipline.md`.
 
-Standard/Critical work receives an independent review against the named integration branch. The implementer fixes actionable findings; material fixes require fresh independent re-review. A reviewer that edits a finding cannot certify its own correction.
+Standard/Critical work receives an independent review against the named integration branch. The implementer fixes actionable findings; material fixes require fresh independent re-review. A reviewer that edits a finding cannot certify its own correction. Track correction count separately from dispatch/recovery retries. A reviewed PASS implementation lane is complete according to its plan state; do not mark it blocked merely because a downstream serial composition or integration dependency is not ready—the dependency graph must represent that wait.
 
-Store concise evidence in Beads metadata and append detailed command/output references in notes. Follow `references/evidence-contract.md`.
+Store concise evidence in Beads metadata and append detailed command/output references in notes. Follow `references/evidence-contract.md` and `references/correction-convergence.md`.
 
 **Completion criterion:** focused gates pass on the exact candidate SHA, review verdict is PASS with no unresolved actionable finding, and the evidence record identifies who verified what.
 
@@ -368,7 +387,7 @@ Always ask before:
 - destructive Git/filesystem/database operations;
 - force push, release, deployment, external communication, credential/config changes;
 - merging/pushing to a target not explicitly authorized;
-- exceeding any approved weighted-capacity, workload-reserve, pressure, emergency worker-ceiling, retry, correction, test, time, or token circuit breaker;
+- exceeding any approved weighted-capacity, workload-reserve, pressure, emergency worker-ceiling, total retry, total correction, test, time, or token circuit breaker; an in-envelope strategy change below those total caps does not require approval;
 - reclaiming an ambiguous worker that may still be active.
 
 Do not ask for routine TDD fixes, predetermined reviews, normal task claims, evidence updates, authorized local integration, dashboard refreshes, or safe scheduling inside a delegated decision envelope.
@@ -390,6 +409,15 @@ Do not ask for routine TDD fixes, predetermined reviews, normal task claims, evi
 13. **Metric-validity blindness.** Tests that prove a hardcoded threshold is enforced do not prove the metric predicts real pressure. Replay live host states and representative workloads; never use sticky cumulative swap occupancy as a unilateral blocker. Follow `references/resource-admission-validation.md`.
 14. **Free equal-worker assumption.** Do not treat `maxWorkers` or RAM size alone as capacity; use weighted classes and reserves.
 15. **Silent stop override.** A user pause is immediate, not “after the current step.”
+16. **Premature human escalation.** Treating a second review FAIL as a new authority decision defeats delegated missions. Change strategy automatically below the approved total correction cap; ask only at the cap or a real envelope boundary.
+17. **False blocked PASS lane.** A reviewed PASS candidate waiting on downstream composition is not itself blocked. Close/complete it according to the plan and let dependencies hold the composition lane.
+18. **Passive or unsubmitted observer nudge.** External evaluation is not status narration. When the sole controller is clearly idle with admitted ready work, send one evidence-based nudge, press Enter, and verify the pane accepted it; text left at the prompt is no action.
+19. **One-shot observer mistaken for recurring.** Duration syntax such as `12m` schedules one delayed run. Use `every 12m`, list the job immediately, and verify enabled/scheduled state plus a future next run after the first tick.
+20. **Violation consumes mandatory gate.** Record forbidden worker broad suites as actual incidents, but do not silently spend reserved final-gate authority or accept them at the wrong SHA. Keep actual-run accounting separate from authorized gate-slot use.
+21. **Broad-test violation containment.** A worker brief prohibition is not enforcement. At every completion artifact and material worker inspection, inspect the process tree for `npm test`, `npm run test`, smoke, and equivalent broad commands. If a forbidden broad command is live, terminate only its process group—not the launcher or worker—then preserve and reconcile the artifact. Count it only if completion evidence proves it finished; an interrupted run is partial/unverified and uncounted. If the artifact later proves an already-completed broad suite, correct the ledger to count it before dispatching another gate.
+22. **Stale watcher destination.** A watcher with an old controller pane is invalid even if its PID is live. Kill it, keep the stable launcher/artifact intact, and recreate one watcher bound to the current controller pane before relying on completion delivery.
+23. **Checkpoint-only final.** Reporting the next ready task and returning idle is a liveness failure. Apply the pre-final continuation guard and dispatch/refill in the same turn.
+24. **Watchdog as scheduler.** The timer guard only wakes an idle controller. Giving it claims, scheduling, reconciliation, Git, test, or Beads mutation authority creates a second controller and is forbidden.
 
 ## Context-preserving long stages
 
@@ -398,6 +426,16 @@ When the user asks to preserve the parent conversation context, or when implemen
 A created tab or pane is not proof of startup, and a process exit is not proof of success. Verify the actual agent process, require durable result artifacts, independently rerun the relevant gates in the parent session, and close the completed mission-owned tab promptly after verification. Never reuse or close unrelated panes.
 
 Follow `references/detached-herdr-stage.md` for the reusable launch, watcher, artifact, verification, and cleanup pattern.
+
+## External supervision when dogfooding Conductor
+
+When the mission is also evaluating Conductor itself, do not let one session both operate the mission and judge whether the skill caused correct behavior. Use a dedicated persistent interactive Conductor pane as the **sole** control-plane mutator, keep workers beneath it, and make the parent/meta session a read-only evaluator. Freeze the controller session to the skill snapshot it loaded for the evaluation interval; collect findings separately and normally patch only after mission closure and user review. If the user explicitly orders a library update at a bounded checkpoint, record that the active controller remains bound to its prior loaded snapshot and require a fresh controller session before attributing behavior to the new version. A one-shot controller is insufficient because it cannot remain available for completion-wake events.
+
+Handoff must bind approved authority, Beads/Git/Herdr paths, active launcher PID/start identity, leases, watchers and their destination panes, artifacts, review findings, budgets, and unused launch tokens. The receiving Conductor must independently reconcile every claim before acting. Explicitly retire the old controller, discard unclaimed tokens, and ensure inherited watchers either target the new pane or have a temporary relay; dual controllers invalidate mission ownership and evaluation evidence.
+
+Follow `references/external-supervision.md` for the reusable topology, safe handoff sequence, evaluation signals, and pitfalls.
+
+For deterministic controller/watchdog changes, use `references/read-only-continuation-runtime-review.md` as the independent negative-path review checklist.
 
 ## Controller admission evaluation
 
@@ -443,6 +481,7 @@ When synchronizing a public/source package with the installed skill, load `refer
 - [ ] Mission epic and dependency graph are durable and cycle-free.
 - [ ] Every task separates urgency from risk and defines acceptance/evidence.
 - [ ] Every active claim maps to one worker, pane, branch, worktree, and base SHA.
+- [ ] Delegated mode has exactly one verified-live idle watchdog for the current controller pane and one qualified completion watcher per active worker.
 - [ ] Weighted capacity, workload class reserves, available-RAM floor, PSI/swap-I/O pressure gates, emergency process ceiling, retry budget, and single full-suite/integration lanes are enforced; cumulative swap occupancy is not a unilateral blocker.
 - [ ] Standard/Critical work has independent review evidence at the exact candidate SHA.
 - [ ] Integrated-base checks and merge SHA are recorded before task closure.

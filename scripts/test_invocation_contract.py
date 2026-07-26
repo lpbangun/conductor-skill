@@ -291,14 +291,53 @@ class InvocationContractTests(unittest.TestCase):
         self.assertIn("Git", readme)
         self.assertIn("/conductor resume", readme)
 
-    def test_readme_clarifies_controller_admission_is_conditional(self):
+    def test_readme_documents_bundled_wake_guard_boundary(self):
         readme = (ROOT / "README.md").read_text()
         lowered = readme.lower()
-        # Controller admission policy applies only when an external deterministic controller exists/changes.
         self.assertIn("controller", lowered)
-        # Must state that no controller daemon/runtime is bundled.
-        self.assertIn("does not bundle", lowered)
-        self.assertIn("daemon", lowered)
+        self.assertIn("controller_idle_watchdog.py", readme)
+        self.assertIn("wake", lowered)
+        self.assertIn("does not schedule", lowered)
+
+    # --- Persistent continuation runtime ---
+
+    def test_skill_version_marks_runtime_contract(self):
+        self.assertIn("version: 1.5.0", SKILL)
+
+    def test_delegated_missions_require_idle_watchdog(self):
+        self.assertIn("scripts/controller_idle_watchdog.py", SKILL)
+        self.assertIn("delegated supervision", SKILL.lower())
+        self.assertIn("verified live", SKILL.lower())
+
+    def test_pre_final_guard_rejects_checkpoint_only_completion(self):
+        self.assertIn("Pre-final continuation guard", SKILL)
+        self.assertIn("checkpoint-only final", SKILL.lower())
+        self.assertIn("ready frontier", SKILL.lower())
+
+    def test_watchdog_is_not_a_second_controller(self):
+        self.assertIn("must not claim", SKILL.lower())
+        self.assertIn("must not run `scheduler_decision.py`", SKILL.lower())
+        self.assertIn("sole control-plane authority", SKILL.lower())
+
+    def test_speed_reference_documents_timer_and_rate_limit(self):
+        ref = (ROOT / "references" / "speed-first-liveness.md").read_text()
+        self.assertIn("controller_idle_watchdog.py", ref)
+        lowered = ref.lower()
+        self.assertIn("30 seconds", ref)
+        self.assertIn("90 seconds", ref)
+        self.assertIn("fingerprint", lowered)
+        self.assertIn("qualified live watcher", lowered)
+        self.assertIn("transient", lowered)
+        self.assertIn("retry", lowered)
+        self.assertIn("--session-id", ref)
+        self.assertIn("agent session", lowered)
+        self.assertIn("controller cwd", lowered)
+        self.assertIn("--limit 0", ref)
+        self.assertIn("watcher pid", lowered)
+        self.assertIn("start ticks", lowered)
+
+    def test_read_only_runtime_review_is_linked(self):
+        self.assertIn("references/read-only-continuation-runtime-review.md", SKILL)
 
     # --- New authority fields appear in preview and contract reference ---
 

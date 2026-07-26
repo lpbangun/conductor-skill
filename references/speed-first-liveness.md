@@ -52,7 +52,7 @@ python3 scripts/watch_worker_completion.py \
   --receipt "$MISSION_DIR/watchers/$TASK_ID.json"
 ```
 
-Record the watcher PID, exact lifecycle identity, launcher command, actual accepted provider/model after fallback, exact per-attempt artifact path, dispatch-unique completion token, conductor pane, and receipt path in Beads. Generate the token with at least 128 bits of randomness (for example `secrets.token_hex(16)`), place it in the worker brief, and never reuse it across retries or tasks. The watcher accepts only a hexadecimal token of at least 32 characters. The per-attempt result path must not exist at watcher attachment; any pre-existing file or symlink is replay/ambiguous evidence and requires manual reconciliation. On pidfd-capable hosts, verify PID/start-ticks identity again after opening the pidfd so PID reuse cannot cross the check/open boundary. Verify the watcher process is live before the Conductor turn may become idle. A receipt bound to a replaced child PID is non-qualifying even if the eventual fallback writes the expected artifact; its exit timestamp and latency do not describe end-to-end completion.
+Before launch, resolve one canonical result-artifact path and put that exact absolute path in both the worker brief and watcher command. Record the watcher PID, exact lifecycle identity, launcher command, actual accepted provider/model after fallback, exact per-attempt artifact path, dispatch-unique completion token, conductor pane, and receipt path in Beads. Do not assume the worker worktree and control worktree share `.hermes/conductor/results`; if a worker writes only inside its own worktree, retire the mismatched watcher, inspect the exact artifact and candidate SHA, copy the artifact into durable control evidence, and only then review/reconcile. Generate the token with at least 128 bits of randomness (for example `secrets.token_hex(16)`), place it in the worker brief, and never reuse it across retries or tasks. The watcher accepts only a hexadecimal token of at least 32 characters. The per-attempt result path must not exist at watcher attachment; any pre-existing file or symlink is replay/ambiguous evidence and requires manual reconciliation. On pidfd-capable hosts, verify PID/start-ticks identity again after opening the pidfd so PID reuse cannot cross the check/open boundary. Verify the watcher process is live before the Conductor turn may become idle. A receipt bound to a replaced child PID is non-qualifying even if the eventual fallback writes the expected artifact; its exit timestamp and latency do not describe end-to-end completion.
 
 The watcher:
 
@@ -66,6 +66,25 @@ The watcher:
 A background `process wait` handle, a lease, a heartbeat, or a watcher that only exits silently is not a completion-wake handle. Never return idle while an active worker is unwatched. If a verified watcher cannot be established, keep the Conductor turn in foreground supervision or downgrade to checkpointed/session-orchestrated behavior and state that automatic continuation is unavailable.
 
 After a wake, reconcile the exact worker artifact and live Git/Herdr/Beads state before closure. Then immediately resample pressure, run the scheduling decision, and refill every admitted productive lane.
+
+## Controller idle watchdog
+
+Worker completion watchers cannot recover a controller that identifies a ready frontier and then ends its own turn before dispatch. In delegated mode, run one transparent timer guard for the dedicated controller pane:
+
+```bash
+python3 "$CONDUCTOR_SKILL_DIR/scripts/controller_idle_watchdog.py" \
+  --repo "$REPO" \
+  --mission-id "$MISSION_ID" \
+  --pane "$CONDUCTOR_PANE" \
+  --session-id "$CONDUCTOR_SESSION_ID" \
+  --state "$REPO/.hermes/conductor/controller-watchdog.json" \
+  --interval-seconds 30 \
+  --min-repeat-seconds 90
+```
+
+Before launch, query `herdr pane get` and bind `CONDUCTOR_SESSION_ID` to the current Hermes agent session; verify the exact controller cwd equals `REPO`. Run the watchdog as a tracked mission-owned process and record PID plus `/proc/<pid>/stat` start ticks. Verify it remains live after launch. A process-lifetime lock permits exactly one watchdog for the state path. Every 30 seconds it checks only enough evidence to decide whether an idle pane needs a wake. It queries the complete frontier with `--limit 0`, revalidates pane/session/cwd immediately before submission, and suppresses wake while the controller is working or while each in-progress task has a qualified live watcher. Qualification requires exact Beads metadata for watcher PID and watcher start ticks, lifecycle PID/start ticks, completion token, receipt, current pane, and exact non-symlink-resolved `result_json` path. It rate-limits an unchanged frontier to one wake per 90 seconds and wakes immediately when the frontier fingerprint changes. A transient Herdr, Beads, process, or filesystem observation error is logged and retried on the next interval instead of terminating the daemon. The daemon exits cleanly when mission status is no longer `active`.
+
+The guard does not schedule. It never claims/closes tasks, mutates Beads or Git, runs tests, chooses a lane, or invokes `scheduler_decision.py`; its only side effect is a verified `herdr pane run` to an idle controller. The dedicated Conductor remains the sole control-plane authority. A legitimate human-only boundary must durably transition `mission.status` away from `active` before the controller returns final; the guard then exits cleanly. Stop the guard on pause, controller handoff, mission closure, or pane retirement.
 
 ## Tight end-to-end liveness evaluation
 

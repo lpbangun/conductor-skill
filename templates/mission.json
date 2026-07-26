@@ -42,7 +42,7 @@
     "maxSwapOutMiBPerSecond": 64.0,
     "staleAfterMinutes": 20,
     "maxRetriesPerTask": 2,
-    "maxCorrectionCycles": 2,
+    "maxCorrectionCycles": 5,
     "maxFullSuites": 2,
     "workloadClasses": {
       "light": {

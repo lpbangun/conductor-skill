@@ -2,7 +2,7 @@
 
 Conductor is a Hermes Agent skill for safely coordinating durable, multi-step software missions across multiple workers, Git worktrees, reviews, and integration gates.
 
-It is a thin policy and reconciliation layer—not a coding agent, scheduler daemon, process registry, or replacement for Git.
+It is a thin policy and reconciliation layer—not a coding agent, scheduler, process registry, or replacement for Git. Delegated mode bundles a transparent idle wake guard; it does not schedule or mutate mission state.
 
 ## Intended use
 
@@ -80,7 +80,7 @@ These are referenced by the policy and should be installed/configured when their
 - credentials and model providers required by the chosen worker roles
 - an optional sanitized dashboard project when `dashboard.enabled` is true
 
-Conductor does not bundle Beads, Herdr, model credentials, a dashboard host, or a background controller daemon.
+Conductor does not bundle Beads, Herdr, model credentials, or a dashboard host. It bundles `scripts/controller_idle_watchdog.py`, a timer-based wake transport for a dedicated delegated controller. The guard does not schedule, claim work, edit Beads/Git, run tests, or replace the controller.
 
 ## Install
 
@@ -125,7 +125,7 @@ hermes -s conductor chat -q \
   "Implement feature X in ~/projects/myapp. Begin intake only."
 ```
 
-Without a separate durable controller, execution is session-orchestrated. Beads, Herdr, and Git preserve recovery state across interruptions, but after restarting the main session you must run `/conductor resume`.
+Without a live dedicated controller pane, execution is session-orchestrated. Beads, Herdr, and Git preserve recovery state across interruptions, but after restarting the controller you must run `/conductor resume`. Delegated mode keeps one tracked idle watchdog for that pane plus one completion watcher per worker so ordinary checkpoint finals and worker exits wake the controller promptly.
 
 ## Safety model
 
@@ -149,7 +149,7 @@ See `SKILL.md` for the complete policy, `references/mission-contract.md` for the
 
 ## Controller admission
 
-The controller admission evaluation policy in `references/controller-admission-evidence.md` applies **only** when an external deterministic controller exists or is materially changed. Conductor does not bundle a controller daemon or runtime; without a separate controller, the admission suite is not required for normal session-orchestrated missions.
+The controller admission evaluation policy in `references/controller-admission-evidence.md` applies when a deterministic controller or safety-bearing runtime is materially changed. The bundled idle watchdog has wake-only authority and must pass its focused tests plus a disposable live-Herdr canary before delegated use.
 
 ## Verify
 
@@ -157,6 +157,7 @@ The controller admission evaluation policy in `references/controller-admission-e
 python3 scripts/test_contract.py -v
 python3 scripts/test_invocation_contract.py -v
 python3 scripts/test_scheduler_liveness.py -v
+python3 scripts/test_controller_watchdog.py -v
 python3 scripts/smoke_test.py
 python3 -m py_compile scripts/*.py
 ```
