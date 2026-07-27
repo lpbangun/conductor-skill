@@ -351,9 +351,21 @@ def acquire_instance_lock(repo: Path, mission_id: str) -> int:
         raise RuntimeError(f"another watchdog owns {lock_path}") from exc
 
 
-def fingerprint(reason: str, ready: list[str], in_progress: list[str], qualified: set[str]) -> str:
+def fingerprint(
+    reason: str,
+    ready: list[str],
+    in_progress: list[str],
+    qualified: set[str],
+    blocked: list[str] | None = None,
+) -> str:
     payload = json.dumps(
-        {"reason": reason, "ready": sorted(ready), "inProgress": sorted(in_progress), "qualified": sorted(qualified)},
+        {
+            "reason": reason,
+            "ready": sorted(ready),
+            "inProgress": sorted(in_progress),
+            "qualified": sorted(qualified),
+            "blocked": sorted(blocked or []),
+        },
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -412,6 +424,10 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         tid for task in tasks
         if isinstance(task, dict) and task.get("status") == "in_progress" and (tid := task_id(task))
     )
+    blocked = sorted(
+        tid for task in tasks
+        if isinstance(task, dict) and task.get("status") == "blocked" and (tid := task_id(task))
+    )
     expected_script = getattr(args, "expected_watcher_script", EXPECTED_WATCHER_SCRIPT)
     watchers = scan_watchers(Path(args.proc_root), expected_script=expected_script)
     qualified = qualified_watcher_tasks(args.pane, args.session_id, tasks, watchers)
@@ -437,6 +453,11 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         }
     elif in_progress:
         reason = "in_progress_without_qualified_watcher"
+    elif blocked:
+        # Blocked is a classification the controller writes about itself.
+        # Without a durably recorded exact boundary it is a self-stall;
+        # wake for a boundary audit instead of trusting it.
+        reason = "blocked_beads_require_boundary_audit"
     else:
         unfinished = sorted(
             tid for task in tasks
@@ -448,7 +469,7 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             return 0, {"wakeDelivered": False, "reason": "no_unfinished_work"}
         reason = "active_mission_without_productive_work"
 
-    fp = fingerprint(reason, ready, in_progress, qualified)
+    fp = fingerprint(reason, ready, in_progress, qualified, blocked)
     now = time.time()
     state = load_state(Path(args.state))
     state_bound = (
@@ -482,8 +503,11 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     message = (
         f"Wake guard ({reason}): {drift_note}reconcile mission {args.mission_id} from durable Beads/Git/process/artifact evidence now. "
         f"Ready={','.join(ready) or 'none'}; in_progress={','.join(in_progress) or 'none'}; "
-        f"unqualified_in_progress={','.join(unqualified_in_progress) or 'none'}. "
+        f"unqualified_in_progress={','.join(unqualified_in_progress) or 'none'}; "
+        f"blocked={','.join(blocked) or 'none'}. "
         "If an authorized dependency-ready/resource-safe lane exists, sample resources, run scheduler_decision.py, and dispatch/refill immediately. "
+        "A blocked bead without an exact durably recorded boundary (dependency, ownership, resource, or named human authority decision) is a recovery candidate: verify, unblock, and redispatch. "
+        "Invented authority gates are forbidden — actions the approved contract already authorizes need no new human approval. "
         "Do not merely summarize the next action and return idle. If a real human boundary blocks progress, record the exact boundary durably."
     )
     pre_submit_status, _pre_drift = observe_controller_status(
@@ -612,8 +636,10 @@ def run_loop(
     evaluate: Any = evaluate_once,
     sleeper: Any = time.sleep,
     max_iterations: int | None = None,
+    inactive_exit_ticks: int = 5,
 ) -> int:
     iterations = 0
+    inactive_streak = 0
     while True:
         try:
             code, result = evaluate(args)
@@ -624,7 +650,14 @@ def run_loop(
         if args.once:
             return code
         if result.get("reason") == "mission_not_active":
-            return 0
+            # A transient lifecycle transition (a one-field status rewrite,
+            # a resume race) must not permanently kill the guard.  Exit only
+            # after the inactive state persists across consecutive ticks.
+            inactive_streak += 1
+            if inactive_streak >= inactive_exit_ticks:
+                return 0
+        else:
+            inactive_streak = 0
         if max_iterations is not None and iterations >= max_iterations:
             return code
         sleeper(args.interval_seconds)

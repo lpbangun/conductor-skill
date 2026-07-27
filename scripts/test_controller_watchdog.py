@@ -274,6 +274,35 @@ else: print(json.dumps({'error':'unexpected','args':args})); sys.exit(2)
         self.assertEqual(out["sessionDrift"], "session-resumed")
         self.assertFalse(self.herdr_log.exists())
 
+    def test_blocked_beads_without_frontier_wake_for_boundary_audit(self):
+        self._set_bd(tasks=[{"id": "task-9", "status": "blocked"}])
+        _, out = self._run()
+        self.assertTrue(out["wakeDelivered"])
+        self.assertEqual(out["reason"], "blocked_beads_require_boundary_audit")
+        logged = [json.loads(x) for x in self.herdr_log.read_text().splitlines()]
+        message = logged[0][3]
+        self.assertIn("task-9", message)
+        self.assertIn("recovery candidate", message)
+        self.assertIn("Invented authority gates are forbidden", message)
+
+    def test_blocked_audit_wake_is_rate_limited_by_fingerprint(self):
+        self._set_bd(tasks=[{"id": "task-9", "status": "blocked"}])
+        _, first = self._run()
+        self.assertTrue(first["wakeDelivered"])
+        self._set_herdr("idle")
+        _, second = self._run()
+        self.assertFalse(second["wakeDelivered"])
+        self.assertEqual(second["reason"], "wake_rate_limited")
+
+    def test_ready_frontier_outranks_blocked_audit_reason(self):
+        self._set_bd(
+            ready=[{"id": "task-1", "status": "open"}],
+            tasks=[{"id": "task-1", "status": "open"}, {"id": "task-9", "status": "blocked"}],
+        )
+        _, out = self._run()
+        self.assertTrue(out["wakeDelivered"])
+        self.assertEqual(out["reason"], "ready_without_live_watcher")
+
     def test_contract_mission_id_mismatch_fails_closed(self):
         contract = {"mission":{"status":"active"}, "ledger":{"missionId":"other-mission"}}
         (self.repo / ".hermes/conductor/mission.json").write_text(json.dumps(contract))
@@ -578,7 +607,7 @@ class DaemonLoopTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(sleeps, [0.01])
 
-    def test_terminal_mission_stops_daemon_without_sleep(self):
+    def test_persistent_inactive_mission_stops_daemon_after_grace_streak(self):
         sleeps = []
 
         class Args:
@@ -589,7 +618,36 @@ class DaemonLoopTests(unittest.TestCase):
             Args(), evaluate=lambda _args: (0, {"reason":"mission_not_active"}), sleeper=sleeps.append
         )
         self.assertEqual(code, 0)
-        self.assertEqual(sleeps, [])
+        # Exits only after 5 consecutive inactive observations (4 sleeps);
+        # a single transient status flip no longer kills the guard.
+        self.assertEqual(sleeps, [30, 30, 30, 30])
+
+    def test_transient_inactive_streak_resets_and_keeps_daemon_alive(self):
+        outcomes = [
+            (0, {"reason": "mission_not_active"}),
+            (0, {"reason": "mission_not_active"}),
+            (0, {"reason": "controller_working"}),
+            (0, {"reason": "mission_not_active"}),
+            (0, {"reason": "mission_not_active"}),
+        ]
+        consumed = []
+        sleeps = []
+
+        class Args:
+            once = False
+            interval_seconds = 0.01
+
+        def evaluate(_args):
+            item = outcomes[len(consumed)]
+            consumed.append(item)
+            return item
+
+        code = self.module.run_loop(
+            Args(), evaluate=evaluate, sleeper=sleeps.append, max_iterations=5, inactive_exit_ticks=3
+        )
+        self.assertEqual(len(consumed), 5)  # never exited early
+        self.assertEqual(code, 0)
+        self.assertEqual(len(sleeps), 4)
 
     def test_duplicate_watchdog_lock_fails_immediately(self):
         with tempfile.TemporaryDirectory(prefix="conductor-watchdog-lock-") as tmp:

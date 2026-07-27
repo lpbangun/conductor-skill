@@ -1,7 +1,7 @@
 ---
 name: conductor
 description: "Use when the user authorizes a multi-step software mission that should continue autonomously across workers, worktrees, reviews, integration gates, failures, or session restarts. Orchestrates Beads as the durable ledger and Herdr as the execution surface with risk-proportional routing, evidence-backed transitions, resource admission, stale-claim recovery, and explicit human boundaries. Do not use for a single bounded task or strategy discussion without execution approval."
-version: 1.7.4
+version: 1.7.5
 author: Hermes Agent
 license: MIT
 platforms: [linux]
@@ -52,7 +52,7 @@ Do not use for:
 ## Non-negotiable invariants
 
 1. **Approval is scoped.** A user-approved mission contract authorizes only its objective, repositories, milestone, autonomy mode, resource limits, and side effects. New product strategy, destructive operations, force pushes, credential changes, releases, or scope expansion require renewed approval.
-2. **Conductor does not implement, commit, or merge.** Delegate mutating product work to a bounded worker. The conductor may perform deterministic control-plane operations after verified PASS: update Beads, inspect state, create approved worktrees, run predetermined gates, update the dashboard, and clean up owned resources. Commits and merges belong to the serialized integration lane and are executed only by Droid (invariant 8).
+2. **Conductor does not implement, commit, or merge.** Delegate mutating product work to a bounded worker. The conductor may perform deterministic control-plane operations after verified PASS: update Beads, inspect state, create approved worktrees, run predetermined gates, update the dashboard, and clean up owned resources. Commits and merges belong to the serialized integration lane and are executed only by Droid (invariant 8). This invariant restricts the conductor process, not the mission's authorized lanes: Droid commit and merge under an approved contract require no additional human approval, and demanding it is an invented gate, not caution.
 3. **Evidence beats self-report.** A worker’s “done” is a signal to inspect, never proof. Verify the exact worktree, branch, diff, SHA, commands, exit codes, review verdict, and integrated-base result.
 4. **One mutating owner per worktree.** Parallel mutation requires separate branches/worktrees. Shared integration files have one named owner.
 5. **No hidden authority.** Do not create a second database, scheduler, merge queue, or process registry. Shell directly to `bd --json` and Herdr’s live CLI. Delegated missions use two transparent mission-owned liveness processes defined in `references/speed-first-liveness.md`: one completion watcher per worker and one controller idle watchdog per dedicated pane. They may observe state and wake the sole controller, but they must not claim tasks, mutate Beads/Git, choose work, run tests, or run `scheduler_decision.py`.
@@ -268,6 +268,8 @@ A correction failure triggers diagnosis, not automatic human interruption. After
 
 Do not repeatedly resend prompts, infer failure from one watcher timeout, or reclaim from lease expiry alone. Keep scheduling unrelated ready work. Follow `references/correction-convergence.md` for finding fingerprints, no-progress detection, evidence, and human-boundary rules.
 
+**Blocked is an evidence state, not a mood.** A bead may be marked blocked only with an exact boundary durably recorded in its metadata — a named dependency, ownership conflict, resource ceiling, or a human authority decision with where and when it was asked. Invented gates are forbidden: if the approved contract already authorizes an action (Droid-owned commit/merge under `localIntegrationAuthorized` is the canonical case), requiring further human approval is an error. Reconcile treats every blocked bead lacking a durable boundary as a recovery candidate: verify, unblock, and redispatch. The idle watchdog audits blocked beads and wakes for this check.
+
 A heartbeat is a compact metadata update, not prose chatter. Refresh it after observable progress, a test/review transition, or bounded supervision interval. Do not use heartbeats to conceal a worker that is idle at a prompt.
 
 **Completion criterion:** each active lane is progressing, safely waiting on an explicit gate, or has one recorded recovery action; unrelated ready work continues.
@@ -283,7 +285,7 @@ The controller may return idle only when at least one condition is proven:
 - every unfinished lane is dependency/ownership/resource blocked and the exact blocker is durable;
 - productive workers are live and every one has a qualified watcher bound to the current pane and actual result path.
 
-If the ready frontier is non-empty and no qualified productive worker already covers it, continue in the same turn: sample resources, run `scripts/scheduler_decision.py`, claim atomically, and dispatch/refill. Never end with only “task X is ready next.” The idle watchdog is recovery for model-turn failure, not permission to stop at routine checkpoints.
+If the ready frontier is non-empty and no qualified productive worker already covers it, continue in the same turn: sample resources, run `scripts/scheduler_decision.py`, claim atomically, and dispatch/refill. Never end with only “task X is ready next.” A final response that names a next action without executing it — while no durable human boundary blocks — is a checkpoint-only final and is forbidden; execute the action in the same turn. The idle watchdog is recovery for model-turn failure, not permission to stop at routine checkpoints.
 
 **Completion criterion:** every active-mission final response names the proven idle condition; otherwise the controller remains working and advances the loop.
 
@@ -405,7 +407,7 @@ Always ask before:
 - exceeding any approved weighted-capacity, workload-reserve, pressure, emergency worker-ceiling, total retry, total correction, test, time, or token circuit breaker; an in-envelope strategy change below those total caps does not require approval;
 - reclaiming an ambiguous worker that may still be active.
 
-Do not ask for routine TDD fixes, predetermined reviews, normal task claims, evidence updates, authorized local integration, dashboard refreshes, or safe scheduling inside a delegated decision envelope.
+Do not ask for routine TDD fixes, predetermined reviews, normal task claims, evidence updates, authorized local integration, dashboard refreshes, or safe scheduling inside a delegated decision envelope. In particular, when the approved envelope grants `localIntegrationAuthorized: true` and `integrationOwner: droid`, a reviewed-PASS candidate’s normal Droid commit/merge is authorized integration work—not a separate human commit-authority gate. The conductor does not commit; it dispatches the Droid integration lane.
 
 ## Common pitfalls
 
@@ -481,6 +483,7 @@ When synchronizing a public/source package with the installed skill, load `refer
 - [ ] Every active claim maps to one worker, pane, branch, worktree, and base SHA.
 - [ ] Delegated mode has exactly one verified-live idle watchdog for the current controller pane and one qualified completion watcher per active worker.
 - [ ] Weighted capacity, workload class reserves, available-RAM floor, PSI/swap-I/O pressure gates, emergency process ceiling, retry budget, and single full-suite/integration lanes are enforced; cumulative swap occupancy is not a unilateral blocker.
+- [ ] Every blocked bead carries a durable exact boundary; no invented authority gate was applied to a contract-authorized action.
 - [ ] Every dispatched unit matches the approved routing plan (lane, review policy); deviations are re-approved or recorded as in-lane judgment.
 - [ ] Critical work (and Standard work where review was required) has independent review evidence at the exact candidate SHA; plan-only lanes carry no separate plan review.
 - [ ] Integrated-base checks and merge SHA are recorded before task closure.
