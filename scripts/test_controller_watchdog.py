@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -11,6 +12,8 @@ from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from package_version import VERSION
 SCRIPT = HERE / "controller_idle_watchdog.py"
 WATCHER_SCRIPT = str(HERE / "watch_worker_completion.py")
 
@@ -201,6 +204,19 @@ else: print(json.dumps({'error':'unexpected','args':args})); sys.exit(2)
         logged = [json.loads(x) for x in self.herdr_log.read_text().splitlines()]
         self.assertEqual(logged[0][:3], ["pane", "run", "w2N:p1"])
         self.assertIn("reconcile", logged[0][3].lower())
+
+    def test_unknown_controller_status_wakes_once_with_observed_state(self):
+        self._set_herdr("new-herdr-state")
+        self._set_bd(ready=[{"id": "task-1"}])
+        _, first = self._run()
+        self.assertTrue(first["wakeDelivered"])
+        self.assertEqual(first["reason"], "controller_status_unrecognized:new-herdr-state")
+        logged = [json.loads(x) for x in self.herdr_log.read_text().splitlines()]
+        self.assertIn("new-herdr-state", logged[0][3])
+        self._set_herdr("new-herdr-state")
+        _, second = self._run()
+        self.assertFalse(second["wakeDelivered"])
+        self.assertEqual(second["reason"], "wake_rate_limited")
 
     def test_working_controller_is_never_interrupted(self):
         self._set_herdr("working")
@@ -415,7 +431,7 @@ else: print(json.dumps({'error':'unexpected','args':args})); sys.exit(2)
         self.assertEqual(saved["missionId"], "mission-1")
         self.assertEqual(saved["pane"], "w2N:p1")
         self.assertEqual(saved["sessionId"], "session-1")
-        self.assertEqual(saved["version"], "1.5.0")
+        self.assertEqual(saved["version"], VERSION)
         saved["pane"] = "old:p1"
         self.state.write_text(json.dumps(saved))
         self._set_herdr("idle")

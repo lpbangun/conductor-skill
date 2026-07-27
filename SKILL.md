@@ -1,7 +1,7 @@
 ---
 name: conductor
 description: "Use when the user authorizes a multi-step software mission that should continue autonomously across workers, worktrees, reviews, integration gates, failures, or session restarts. Orchestrates Beads as the durable ledger and Herdr as the execution surface with risk-proportional routing, evidence-backed transitions, resource admission, stale-claim recovery, and explicit human boundaries. Do not use for a single bounded task or strategy discussion without execution approval."
-version: 1.5.0
+version: 1.6.0
 author: Hermes Agent
 license: MIT
 platforms: [linux]
@@ -205,21 +205,17 @@ Do not initialize Beads during strategy discussion, overwrite an existing databa
 
 ### 3. Classify and route each ready unit
 
-Assign one risk class with a one-sentence rationale and escalation triggers:
+Record both **risk** and **resource class** before claim. Execution risk does not determine resource class. Risk controls review/acceptance; resource class controls admission.
 
-| Risk | Typical work | Default route | Validation |
-|---|---|---|---|
-| Routine | Docs, copy, styling, mechanical cleanup, isolated obvious fix | `tiny`/`smol`, or one direct fast worker | Focused checks; grouped semantic review only if needed |
-| Standard | Localized behavior with clear contracts | One `task` worker in an isolated worktree | RED/GREEN, independent review against integration base, focused gate |
-| Critical | Security/privacy, schema, irreversible/external effects, shared contracts, broad migration | `plan` first; one `task` worker or bounded `/goal` only when iteration is truly needed | Small slices, independent review, distinct invariant checks, milestone broad gate |
+| Risk | Route | Required evidence |
+|---|---|---|
+| Routine | explicit fast provider/model or direct bounded worker | focused checks |
+| Standard | explicit OMP provider/model through `dispatch_worker.py` | focused checks + independent review |
+| Critical | explicit OMP mutating route; independent Factory Droid read-only review against exact candidate/base | invariant checks + fresh review + declared milestone gate |
 
-Escalate when implementation reveals cross-cutting dependencies, unstable interfaces, security/schema implications, repeated correction, unexpected scope growth, or irreversible effects. Do not downgrade merely to save tokens.
+A provider/model is a dispatch field, never an inference from a fallback list. Record requested and accepted route in Beads. If the selected route is unavailable, stop that lane and record the fallback decision; do not silently substitute a harness. Escalate risk for cross-cutting interfaces, security/schema/external effects, repeated correction, or irreversible actions. A Critical lane may still be `light` or `standard` resource class.
 
-Execution risk does not determine resource class. Classify compute cost from the actual command/model workload: planning and read-only review with focused tests are normally `light` or `standard`; a large mutating agent, broad suite, build, browser run, or measured high-memory workload may be `heavy`. A Critical task can therefore use a Standard worker while retaining every Critical review and acceptance gate.
-
-Use expensive models only for ambiguity and judgment. Prefer Factory Droid’s native `/review` against the exact integration base. If Droid is unavailable, use the `advisor` role read-only. A second reviewer is justified only when it answers a distinct acceptance question.
-
-**Completion criterion:** the Bead contains risk label, rationale, escalation triggers, acceptance criteria, owner/worktree boundaries, and named verification route before claim.
+**Completion criterion:** risk, resource class, route, rationale, acceptance, ownership, and verification are durable before claim.
 
 ### 4. Admit work against dependencies and resources
 
@@ -241,23 +237,11 @@ Before dispatch:
 
 ### 5. Claim, dispatch, and establish evidence identity
 
-Atomically claim through Beads before starting a worker. Record:
+Claim through Beads before opening a dedicated Herdr workspace. Record `worktree`, `branch`, `base_sha`, `role`, `route`, `resource_class`, and `ownership`. Then use `scripts/dispatch_worker.py` with a file-backed brief and current controller pane/session. It launches `watch_worker_completion.py`; every active worker has a verified completion-wake handle. Persist its `beadsMetadata` only after the returned launcher and watcher identities are live and exact. Never return idle while an active worker is unwatched. Never use `delegate_task` as a mission worker/reviewer and never use `spawn_agent --background`.
 
-- stable worker/role identity;
-- branch and absolute worktree path;
-- Herdr workspace/tab/pane or terminal ID;
-- claim lease expiration and last heartbeat;
-- base SHA and integration branch;
-- retry count and milestone.
-- approved `resource_class`, `weighted_slots`, and `ram_reserve_gb` copied from the mission contract profile.
+Delegated supervision has one verified live pane/session-bound `scripts/controller_idle_watchdog.py`. It is wake-only: it cannot claim, schedule, test, mutate Git/Beads/worktrees, or select routes; it must not run `scheduler_decision.py`. A controller replacement retires old watchers and creates a fresh pane/session binding; a session mismatch is a durable recovery state, not an implicit retarget.
 
-Create/open Herdr topology only after the claim succeeds. Keep the primary workspace as the project home and pass an explicit `--path` for feature worktrees; the default worktree path is `~/projects/<name>-worktrees/<branch-slug>/` unless the operator overrides it. Never accept Herdr's default path silently. Use a self-contained brief based on `templates/worker-brief.md`. Require the worker to read project instructions and report artifacts, commands, outputs, risks, and next action.
-
-For delegated supervision, first launch exactly one `scripts/controller_idle_watchdog.py` as a tracked mission-owned process for the dedicated controller pane and require verified live state. Bind `--session-id` to the current Hermes `agent_session` from `herdr pane get`; verify the pane agent is Hermes and its controller cwd equals the mission repo before launch and every wake. Use a 30-second observation interval and a 90-second same-frontier wake cooldown unless the approved contract names stricter values. Record its PID, PID start ticks, pane, mission ID, state path, command, and loaded Conductor version. The watchdog is a wake transport, not a second controller: it must not claim or close Beads, mutate Git/worktrees, select tasks, run tests, and must not run `scheduler_decision.py`. The dedicated Conductor remains the sole control-plane authority. If the watchdog exits unexpectedly, delegated continuation is unavailable until it is safely recreated.
-
-Then launch the exact package script `scripts/watch_worker_completion.py` (absolute path, not a basename-only copy) as a separate mission-owned process for each worker after verifying the lifecycle PID/start identity, expected result marker, **the actual absolute result-artifact path the worker was instructed to write**, the currently active controller pane destination, and the current controller session via `--conductor-session`. Never assume worker and control worktrees share `.hermes/conductor/results`: standardize the artifact path in the brief, or explicitly configure the watcher for the worker-worktree path; if a completed artifact is found only in the worker worktree, retire the mismatched watcher, inspect and copy/recover the exact artifact into durable control evidence, then review from the candidate SHA. Never copy a destination pane ID or session from a previous controller: verify the target pane exists and belongs to the current sole controller immediately before launch, record pane plus `conductor_session` in Beads, and replace/retire any watcher when controller handoff changes that destination. The lifecycle PID must cover the whole mutating attempt. For a direct worker command it is the worker PID; for a fallback-capable launcher such as `spawn_agent.py`, it is the stable launcher PID, never the first provider child that may exit before a replacement child starts. Record the launcher/worker PID, start ticks, actual accepted provider/model, watcher PID, absolute receipt path, and controller session, then verify the watcher is live. A generic background wait that exits silently is not sufficient. Never return idle while an active worker is unwatched. Do not claim completion latency from a replaced child PID. On a validated wake after the lifecycle process exits, reconcile the worker evidence and Bead immediately, then resample and refill through `scripts/scheduler_decision.py`. Follow `references/speed-first-liveness.md`.
-
-**Completion criterion:** Beads claim, Herdr process/tracked subprocess handle, exact cwd, worktree, branch, base SHA, and—when delegated—the verified completion-wake handle all cross-reference one another, and the expected agent and watcher are independently confirmed live.
+**Completion criterion:** claimed Bead, worktree, route, launcher, watcher, result path, receipt, pane, and session agree in the dispatch record and Beads metadata.
 
 ### 6. Supervise without stealing implementation
 

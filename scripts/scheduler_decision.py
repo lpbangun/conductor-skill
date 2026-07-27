@@ -268,8 +268,9 @@ def main() -> int:
         snapshot = json.loads(text)
         if not isinstance(snapshot, dict):
             raise ValueError("snapshot must be a JSON object")
-        print(json.dumps(plan_dispatch(snapshot), sort_keys=True))
-        return 0
+        plan = plan_dispatch(snapshot)
+        print(json.dumps(plan, sort_keys=True))
+        return 3 if plan["dispatchBlockedReason"] else 0
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(json.dumps({"error": str(exc), "schemaVersion": 1}), file=sys.stderr)
         return 2

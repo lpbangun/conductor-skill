@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from package_version import VERSION
 SKILL = (ROOT / "SKILL.md").read_text()
 TEMPLATE = (ROOT / "templates" / "mission-intake.md").read_text()
 
@@ -87,8 +90,8 @@ class InvocationContractTests(unittest.TestCase):
         self.assertIn("do not derive a universal worker cap from ram", lowered)
 
     def test_skill_claim_records_weighted_resource_identity(self):
-        for field in ("resource_class", "weighted_slots", "ram_reserve_gb"):
-            self.assertIn(field, SKILL)
+        self.assertIn("resource_class", SKILL)
+        self.assertIn("maxWeightedSlots", SKILL)
 
     def test_skill_preview_discloses_weighted_capacity_model(self):
         for field in ("maxWeightedSlots", "workloadClasses", "emergency `maxWorkers`"):
@@ -132,7 +135,8 @@ class InvocationContractTests(unittest.TestCase):
 
     def test_execution_risk_does_not_imply_resource_class(self):
         self.assertIn("Execution risk does not determine resource class", SKILL)
-        self.assertIn("read-only review with focused tests", SKILL)
+        self.assertIn("Factory Droid read-only review", SKILL)
+        self.assertIn("dispatch_worker.py", SKILL)
 
     def test_focused_tests_do_not_consume_broad_suite_lane(self):
         self.assertIn("Focused tests do not consume", SKILL)
@@ -302,7 +306,7 @@ class InvocationContractTests(unittest.TestCase):
     # --- Persistent continuation runtime ---
 
     def test_skill_version_marks_runtime_contract(self):
-        self.assertIn("version: 1.5.0", SKILL)
+        self.assertIn(f"version: {VERSION}", SKILL)
 
     def test_delegated_missions_require_idle_watchdog(self):
         self.assertIn("scripts/controller_idle_watchdog.py", SKILL)
@@ -317,7 +321,7 @@ class InvocationContractTests(unittest.TestCase):
     def test_watchdog_is_not_a_second_controller(self):
         self.assertIn("must not claim", SKILL.lower())
         self.assertIn("must not run `scheduler_decision.py`", SKILL.lower())
-        self.assertIn("sole control-plane authority", SKILL.lower())
+        self.assertIn("wake-only", SKILL.lower())
 
     def test_speed_reference_documents_timer_and_rate_limit(self):
         ref = (ROOT / "references" / "speed-first-liveness.md").read_text()

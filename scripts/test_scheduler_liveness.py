@@ -66,6 +66,18 @@ class SpeedFirstSchedulerTests(unittest.TestCase):
         snapshot.update(snapshot_overrides)
         return plan_dispatch(snapshot)
 
+    def test_blocked_cli_preserves_json_and_returns_nonzero(self):
+        snapshot = {"ready": [task("a")], "active": [], "resources": {}, "budgets": {}}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as handle:
+            json.dump(snapshot, handle)
+            path = handle.name
+        try:
+            cp = subprocess.run([sys.executable, str(SCRIPT_DIR / "scheduler_decision.py"), path], text=True, capture_output=True)
+        finally:
+            os.unlink(path)
+        self.assertEqual(cp.returncode, 3)
+        self.assertEqual(json.loads(cp.stdout)["dispatchBlockedReason"], "invalid_or_stale_resource_evidence")
+
     def test_two_safe_standard_lanes_are_both_selected(self):
         result = self.plan(ready=[task("c"), task("d")])
         self.assertEqual(["c", "d"], result["selectedTaskIds"])

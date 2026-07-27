@@ -21,13 +21,15 @@ import sys
 import time
 from typing import Any
 
+from package_version import VERSION
+
 PANE_RE = re.compile(r"^[A-Za-z0-9_-]+:p[A-Za-z0-9_-]+$")
 LEDGER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
 TOKEN_RE = re.compile(r"^[0-9a-fA-F]{32,}$")
 IDLE_CONTROLLER_STATES = {"idle", "done"}
 WORKING_CONTROLLER_STATES = {"working", "busy", "running", "processing"}
 COMMAND_TIMEOUT_SECONDS = 15
-WATCHDOG_VERSION = "1.5.0"
+WATCHDOG_VERSION = VERSION
 MAX_INTERVAL_SECONDS = 86400.0
 MAX_MIN_REPEAT_SECONDS = 86400.0
 EXPECTED_WATCHER_SCRIPT = str(Path(__file__).resolve().parent / "watch_worker_completion.py")
@@ -353,8 +355,11 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     status = pane_status(args.herdr_bin, args.pane, repo, args.session_id)
     if status in WORKING_CONTROLLER_STATES:
         return 0, {"wakeDelivered": False, "reason": "controller_working", "controllerStatus": status}
-    if status not in IDLE_CONTROLLER_STATES:
-        return 0, {"wakeDelivered": False, "reason": "controller_not_idle", "controllerStatus": status}
+    unrecognized_status = status not in IDLE_CONTROLLER_STATES
+    if unrecognized_status:
+        reason = f"controller_status_unrecognized:{status}"
+    else:
+        reason = ""
 
     ready_raw = run_json(
         [args.bd_bin, "ready", "--parent", args.mission_id, "--limit", "0", "--json"], cwd=repo
@@ -374,8 +379,13 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     expected_script = getattr(args, "expected_watcher_script", EXPECTED_WATCHER_SCRIPT)
     watchers = scan_watchers(Path(args.proc_root), expected_script=expected_script)
     qualified = qualified_watcher_tasks(args.pane, args.session_id, tasks, watchers)
+    unqualified_in_progress = sorted(set(in_progress) - qualified)
 
-    if ready:
+    if unrecognized_status:
+        # A new Herdr state must not become a silent permanent non-wake. Wake once
+        # with the observed state; fingerprint throttling prevents a storm.
+        reason = f"controller_status_unrecognized:{status}"
+    elif ready:
         reason = "ready_without_live_watcher"
     elif in_progress and set(in_progress).issubset(qualified):
         return 0, {
@@ -423,12 +433,19 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
 
     message = (
         f"Wake guard ({reason}): reconcile mission {args.mission_id} from durable Beads/Git/process/artifact evidence now. "
-        f"Ready={','.join(ready) or 'none'}; in_progress={','.join(in_progress) or 'none'}. "
+        f"Ready={','.join(ready) or 'none'}; in_progress={','.join(in_progress) or 'none'}; "
+        f"unqualified_in_progress={','.join(unqualified_in_progress) or 'none'}. "
         "If an authorized dependency-ready/resource-safe lane exists, sample resources, run scheduler_decision.py, and dispatch/refill immediately. "
         "Do not merely summarize the next action and return idle. If a real human boundary blocks progress, record the exact boundary durably."
     )
     pre_submit_status = pane_status(args.herdr_bin, args.pane, repo, args.session_id)
-    if pre_submit_status not in IDLE_CONTROLLER_STATES:
+    if pre_submit_status in WORKING_CONTROLLER_STATES:
+        return 0, {
+            "wakeDelivered": False,
+            "reason": "controller_changed_before_wake",
+            "controllerStatus": pre_submit_status,
+        }
+    if pre_submit_status not in IDLE_CONTROLLER_STATES and pre_submit_status != status:
         return 0, {
             "wakeDelivered": False,
             "reason": "controller_changed_before_wake",
