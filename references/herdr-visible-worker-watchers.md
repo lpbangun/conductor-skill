@@ -35,6 +35,12 @@ completion_token      # 32 hex chars
 
 Do not substitute approximate names such as `completion_watcher_pid` or relative artifact paths: `controller_idle_watchdog.py` will classify the lane as unqualified.
 
+## TUI prompt and watcher discipline
+
+- A fresh OMP/Droid TUI can initialize after the first prompt injection. Inspect the visible composer after launch; if the brief remains staged, focus the pane and send exactly one `ENTER`, then require `agent_status=working` within 30 seconds. Text injected before the TUI is ready may be lost; treat that as a failed launch, preserve the worktree, and relaunch/submit from the initialized session.
+- Persistent OMP/Droid TUI processes do not exit when the task ends. Launch the pane-aware watcher with `--worker-pane <lane-pane>` and require every brief to name an absolute worker-created result JSON path plus a token-bound completion marker. An exit-only watcher is not suitable for a persistent TUI.
+- If a legacy exit-only watcher is already attached and the worker-created artifact exists, kill only the exact watcher PID, record `manual_reconcile_tui_exit_unavailable`, independently parse the artifact, and advance to the appropriate review lane. Never synthesize a completion artifact.
+
 ## Completion/recovery
 
 - If an agent finishes without a valid qualified watcher, reconcile its pane output, Git diff, and result artifact before changing Beads.
