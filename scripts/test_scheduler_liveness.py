@@ -221,6 +221,15 @@ class SpeedFirstSchedulerTests(unittest.TestCase):
         self.assertEqual(1, len(result["selectedTaskIds"]))
         self.assertEqual("ram_reserve_blocks_second_lane", result["underfillReason"])
 
+    def test_productive_ready_with_no_admissible_selection_is_blocked_not_noop(self):
+        result = self.plan(
+            ready=[task("a", reserve=5.0)],
+            resources=safe_resources(availableRamGb=6.5),
+        )
+        self.assertEqual([], result["selectedTaskIds"])
+        self.assertEqual(1, result["productiveReadyCount"])
+        self.assertNotEqual("", result["dispatchBlockedReason"])
+
     def test_low_ram_blocks_new_dispatch(self):
         result = self.plan(ready=[task("a")], resources=safe_resources(availableRamGb=1.9))
         self.assertEqual([], result["selectedTaskIds"])

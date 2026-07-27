@@ -17,10 +17,7 @@ The worker brief must require the artifact JSON to contain a `completionMarker` 
 
 ## TUI lanes (OMP, Droid)
 
-TUI harnesses never exit at task end, so the watcher's exit-triggered path never runs and a worker that finished without writing its artifact is invisible until the timeout. Two rules close that hole:
-
-- The brief must require the exact same completion artifact (result JSON with `completionMarker`) as hermes lanes — state the result path and the token value explicitly in the brief.
-- Launch the watcher with `--worker-pane <lane pane>` (plus `--idle-after-seconds`, default 600). After the idle threshold, the watcher samples the worker pane; three consecutive idle observations with no artifact produce a manual-reconcile wake instead of waiting out the timeout. On that wake, inspect the worktree and pane transcript; if the work is done, instruct the WORKER to write its own artifact — the conductor never synthesizes it.
+Canonical dispatch is `dispatch_worker.py --harness omp|droid --worker-pane <lane pane>`: it runs the harness binary in the pane, injects the token-substituted brief, verifies the agent is live within `--launch-verify-seconds` (30 by default — Herdr `agent_status: working` or the harness process proven in the proc root; pane creation alone is never a dispatch), and attaches `watch_worker_completion.py` with `--worker-pane` so a worker idle at its prompt without an artifact produces a manual-reconcile wake (`--idle-after-seconds`, default 600) instead of riding out the timeout. TUI harnesses never exit at task end, so an exit-only watcher is never suitable for them, and the brief must require the same `completionMarker` result artifact as hermes lanes. Brief placement, pane discipline, watcher qualification, and the legacy exit-only watcher reconcile procedure: `visible-worker-lanes.md`.
 
 ## Role and route choice
 

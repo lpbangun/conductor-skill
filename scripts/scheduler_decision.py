@@ -245,6 +245,7 @@ def plan_dispatch(snapshot: dict[str, Any]) -> dict[str, Any]:
 
     result["selectedTaskIds"] = [item["id"] for item in selected]
     result["productiveWorkersAfter"] = len(productive_active) + len(selected)
+    result["productiveReadyCount"] = len(productive_ready)
     target = min(2, budget["maxWorkers"])
     result["underfilled"] = result["productiveWorkersAfter"] < target
     if result["underfilled"]:
@@ -256,6 +257,10 @@ def plan_dispatch(snapshot: dict[str, Any]) -> dict[str, Any]:
             resources,
             budget,
         )
+    # Productive ready work with no admissible selection is a dispatch block,
+    # not an empty no-op: surface it so the exit code cannot read as success.
+    if not result["selectedTaskIds"] and productive_ready and not result["dispatchBlockedReason"]:
+        result["dispatchBlockedReason"] = result["underfillReason"] or "no_admissible_selection"
     return result
 
 

@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Conductor Wiring Board — vmi3361268</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0d1322; --panel:#151d30; --panel2:#1a2440; --line:#2b3a5c; --line2:#3a4d7a;
+  --ink:#e9edf6; --dim:#8fa0c2; --faint:#5c6b8f;
+  --amber:#f2b04e; --cyan:#57d0e6; --green:#6fdd8b; --violet:#b195f5; --rose:#f0718a; --red:#e85d5d;
+  --disp:'Space Grotesk',sans-serif; --body:'IBM Plex Sans',sans-serif; --mono:'IBM Plex Mono',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:
+    radial-gradient(1100px 500px at 8% -5%, rgba(242,176,78,.07), transparent 60%),
+    radial-gradient(900px 600px at 100% 100%, rgba(87,208,230,.06), transparent 55%),
+    var(--bg);
+  color:var(--ink); font-family:var(--body); font-size:15px; line-height:1.55;
+  min-height:100vh;
+}
+body::before{
+  content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+  background-image:radial-gradient(rgba(140,160,210,.10) 1px, transparent 1px);
+  background-size:26px 26px;
+  mask-image:linear-gradient(180deg, rgba(0,0,0,.5), rgba(0,0,0,.18));
+}
+.wrap{max-width:1180px;margin:0 auto;padding:0 22px 90px;position:relative;z-index:1}
+
+/* ── top bar ─────────────────────────── */
+.topbar{
+  position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  padding:12px 22px;background:rgba(13,19,34,.92);backdrop-filter:blur(6px);
+  border-bottom:1px solid var(--line);
+}
+.brand{font-family:var(--disp);font-weight:700;font-size:19px;letter-spacing:.04em;display:flex;align-items:center;gap:10px}
+.brand .lamp{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green);animation:lamp 2.4s ease-in-out infinite}
+@keyframes lamp{0%,100%{opacity:1}50%{opacity:.35}}
+.meta{font-family:var(--mono);font-size:11.5px;color:var(--dim);display:flex;gap:14px;flex-wrap:wrap}
+.meta b{color:var(--ink);font-weight:500}
+.spacer{flex:1}
+.switch{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12px;cursor:pointer;user-select:none}
+.switch .track{width:46px;height:24px;border-radius:12px;background:var(--panel2);border:1px solid var(--line2);position:relative;transition:background .25s}
+.switch .knob{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--amber);transition:transform .25s,background .25s;box-shadow:0 0 8px rgba(242,176,78,.6)}
+body.planned .switch .knob{transform:translateX(22px);background:var(--green);box-shadow:0 0 8px rgba(111,221,139,.6)}
+.switch .lbl-as{color:var(--amber)} .switch .lbl-fix{color:var(--faint)}
+body.planned .switch .lbl-as{color:var(--faint)} body.planned .switch .lbl-fix{color:var(--green)}
+#clock{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+
+/* ── section chrome ──────────────────── */
+section{margin-top:52px}
+.kicker{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint)}
+h2{font-family:var(--disp);font-weight:700;font-size:clamp(22px,3vw,30px);letter-spacing:.01em;margin:4px 0 6px}
+h2 .num{color:var(--amber);font-family:var(--mono);font-size:.72em;margin-right:10px;vertical-align:2px}
+.lede{color:var(--dim);max-width:760px;margin-bottom:22px}
+.panel{background:linear-gradient(180deg,var(--panel),rgba(21,29,48,.7));border:1px solid var(--line);border-radius:10px;padding:20px 22px;transition:border-color .25s,transform .25s}
+.panel:hover{border-color:var(--line2)}
+
+/* ── loop rail ───────────────────────── */
+.rail{display:flex;flex-wrap:wrap;gap:0;align-items:stretch;margin-top:8px}
+.step{
+  flex:1 1 auto;min-width:118px;position:relative;padding:14px 12px 12px;text-align:center;
+  font-family:var(--mono);font-size:11.5px;color:var(--dim);
+  border:1px solid var(--line);border-right:none;background:var(--panel);
+}
+.step:first-child{border-radius:10px 0 0 10px}
+.step:last-child{border-radius:0 10px 10px 0;border-right:1px solid var(--line)}
+.step b{display:block;font-family:var(--disp);font-size:13.5px;color:var(--ink);letter-spacing:.03em;margin-bottom:2px}
+.step::after{content:"▸";position:absolute;right:-7px;top:50%;transform:translateY(-50%);color:var(--amber);z-index:2;font-size:12px;text-shadow:0 0 6px rgba(242,176,78,.5)}
+.step:last-child::after{content:none}
+.step:hover{background:var(--panel2);color:var(--ink)}
+.railnote{margin-top:12px;font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+.railnote em{color:var(--cyan);font-style:normal}
+
+/* ── system grid ─────────────────────── */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:860px){.grid{grid-template-columns:1fr}}
+.sys{position:relative;overflow:hidden}
+.sys .tag{position:absolute;top:0;right:0;font-family:var(--mono);font-size:10px;letter-spacing:.14em;padding:4px 12px;border-radius:0 9px 0 10px;text-transform:uppercase}
+.tag.route{background:rgba(242,176,78,.14);color:var(--amber)}
+.tag.exec{background:rgba(87,208,230,.14);color:var(--cyan)}
+.tag.time{background:rgba(177,149,245,.14);color:var(--violet)}
+.tag.ledg{background:rgba(111,221,139,.14);color:var(--green)}
+h3{font-family:var(--disp);font-weight:600;font-size:17px;margin-bottom:12px;letter-spacing:.02em}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:1px}
+.d-amber{background:var(--amber)} .d-cyan{background:var(--cyan)} .d-violet{background:var(--violet)} .d-green{background:var(--green)} .d-rose{background:var(--rose)}
+
+/* lanes */
+.lane{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:10px;background:rgba(13,19,34,.5);transition:border-color .2s,transform .2s}
+.lane:hover{border-color:var(--line2);transform:translateX(3px)}
+.lane .head{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
+.lane .tier{font-family:var(--disp);font-weight:700;font-size:13px;letter-spacing:.12em}
+.tier.r{color:var(--green)} .tier.s{color:var(--amber)} .tier.c{color:var(--rose)}
+.lane .dest{font-family:var(--mono);font-size:11px;color:var(--faint)}
+.mode{font-size:13.5px}
+.mode .fix{display:none;color:var(--green)}
+body.planned .mode .fix{display:inline}
+body.planned .mode .asis{display:none}
+.mode .asis{color:var(--dim)}
+.badge{display:inline-block;font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;padding:2px 7px;border-radius:4px;margin-left:8px;vertical-align:1px;text-transform:uppercase}
+.b-bad{background:rgba(232,93,93,.14);color:var(--red);border:1px solid rgba(232,93,93,.35)}
+.b-warn{background:rgba(242,176,78,.12);color:var(--amber);border:1px solid rgba(242,176,78,.35)}
+.b-ok{background:rgba(111,221,139,.12);color:var(--green);border:1px solid rgba(111,221,139,.35)}
+body.planned .b-bad,body.planned .b-warn.lanebadge{display:none}
+.law{margin-top:10px;font-family:var(--mono);font-size:11.5px;color:var(--faint);border-top:1px dashed var(--line);padding-top:8px}
+.law em{font-style:normal;color:var(--amber)}
+
+/* component rows */
+.crow{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px dashed rgba(43,58,92,.6);font-size:13.5px}
+.crow:last-child{border-bottom:none}
+.crow code{font-family:var(--mono);font-size:12px;color:var(--cyan);background:rgba(87,208,230,.08);padding:1px 6px;border-radius:4px;white-space:nowrap}
+.crow .note{color:var(--dim)}
+.crow .gap{color:var(--rose)}
+body.planned .crow .gap{color:var(--green)}
+
+/* checkup tiers */
+.tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:4px}
+@media(max-width:760px){.tiers{grid-template-columns:1fr}}
+.tiercard{border:1px solid var(--line);border-radius:8px;padding:14px;background:rgba(13,19,34,.5);transition:border-color .2s,transform .2s}
+.tiercard:hover{transform:translateY(-3px);border-color:var(--rose)}
+body.planned .tiercard:hover{border-color:var(--green)}
+.tiercard .tno{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--rose)}
+body.planned .tiercard .tno{color:var(--green)}
+.tiercard b{font-family:var(--disp);font-size:14px;display:block;margin:4px 0 6px}
+.tiercard p{font-size:12.5px;color:var(--dim)}
+.tiercard .own{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:8px;display:block}
+
+/* wiring */
+.wiregrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+@media(max-width:860px){.wiregrid{grid-template-columns:1fr}}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.chip{font-family:var(--mono);font-size:11.5px;padding:5px 11px;border-radius:6px;border:1px solid;transition:transform .15s,box-shadow .2s;cursor:default}
+.chip:hover{transform:translateY(-2px);box-shadow:0 4px 14px rgba(0,0,0,.4)}
+.chip.ok{color:var(--green);border-color:rgba(111,221,139,.4);background:rgba(111,221,139,.07)}
+.chip.miss{color:var(--red);border-color:rgba(232,93,93,.4);background:rgba(232,93,93,.06)}
+body.planned .chip.miss{color:var(--amber);border-color:rgba(242,176,78,.5);background:rgba(242,176,78,.07)}
+.chip.warn{color:var(--amber);border-color:rgba(242,176,78,.4);background:rgba(242,176,78,.06)}
+.chip .fxtag{display:none;color:var(--green)}
+body.planned .chip.miss .fxtag{display:inline}
+.wirenote{margin-top:14px;font-size:12.5px;color:var(--faint);font-family:var(--mono)}
+.wirenote b{color:var(--rose)} body.planned .wirenote b{color:var(--amber)}
+
+/* scorecard */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);text-align:left;padding:9px 12px;border-bottom:1px solid var(--line2)}
+td{padding:9px 12px;border-bottom:1px solid rgba(43,58,92,.55);vertical-align:top}
+tr{transition:background .15s} tbody tr:hover{background:rgba(26,36,64,.55)}
+td.k{font-family:var(--disp);font-weight:600;white-space:nowrap}
+td code{font-family:var(--mono);font-size:11.5px;color:var(--cyan)}
+td .v{font-family:var(--mono);font-size:11.5px}
+.v.bad{color:var(--red)} .v.ok{color:var(--green)} .v.mid{color:var(--amber)}
+body.planned .v.bad{color:var(--amber)}
+td .verdict{color:var(--dim)}
+.fixnote{display:none;font-family:var(--mono);font-size:11px;color:var(--green)}
+body.planned .fixnote{display:inline}
+
+/* plan */
+.steps{display:grid;grid-template-columns:1fr;gap:10px;counter-reset:st}
+.pstep{display:flex;gap:16px;align-items:flex-start;padding:15px 18px;border:1px solid var(--line);border-radius:9px;background:var(--panel);transition:border-color .2s,transform .2s}
+.pstep:hover{border-color:var(--amber);transform:translateX(4px)}
+.pstep .n{counter-increment:st;font-family:var(--mono);font-weight:600;font-size:15px;color:var(--amber);min-width:26px}
+.pstep .n::before{content:counter(st,decimal-leading-zero)}
+.pstep b{font-family:var(--disp);font-size:14.5px;display:block;margin-bottom:2px}
+.pstep p{font-size:13px;color:var(--dim)}
+.pstep .targets{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+.pstep .targets span{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:4px;background:rgba(87,208,230,.09);color:var(--cyan);border:1px solid rgba(87,208,230,.25)}
+.pill{font-family:var(--mono);font-size:10px;letter-spacing:.12em;padding:3px 9px;border-radius:5px;background:rgba(140,160,210,.1);color:var(--dim);border:1px solid var(--line);white-space:nowrap;margin-left:auto;align-self:center;text-transform:uppercase}
+
+/* topology strip */
+.panes{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.pane{font-family:var(--mono);font-size:11px;padding:9px 13px;border-radius:7px;border:1px solid var(--line);background:rgba(13,19,34,.6);transition:border-color .2s}
+.pane:hover{border-color:var(--cyan)}
+.pane .pid{color:var(--cyan)} .pane .st{margin-left:8px}
+.st.working{color:var(--amber)} .st.idle{color:var(--green)} .st.unknown{color:var(--faint)}
+.zeronote{margin-top:10px;font-family:var(--mono);font-size:12px;color:var(--rose)}
+body.planned .zeronote{color:var(--green)}
+
+/* tooltips */
+.tip{position:relative;border-bottom:1px dotted var(--faint);cursor:help}
+.tip:hover::after{
+  content:attr(data-tip);position:absolute;left:0;bottom:calc(100% + 8px);z-index:60;
+  width:max-content;max-width:340px;padding:8px 11px;border-radius:7px;
+  background:#1f2b4a;border:1px solid var(--line2);color:var(--ink);
+  font-family:var(--mono);font-size:11px;line-height:1.5;box-shadow:0 8px 24px rgba(0,0,0,.5);
+  animation:tipin .18s ease-out;
+}
+@keyframes tipin{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* reveals */
+.reveal{opacity:1;transform:none;transition:opacity .55s ease,transform .55s ease}
+.reveal.in{opacity:1;transform:none}
+
+footer{margin-top:64px;border-top:1px solid var(--line);padding-top:20px;font-family:var(--mono);font-size:11px;color:var(--faint);display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+footer b{color:var(--dim);font-weight:500}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="lamp"></span>CONDUCTOR WIRING BOARD</div>
+  <div class="meta">
+    <span>host <b>vmi3361268</b></span>
+    <span>skill <b>v1.6.0</b></span>
+    <span>worktree <b>fa6ca20</b> ≡ installed</span>
+    <span>recon <b>2026-07-27 · read-only</b></span>
+    <span id="clock"></span>
+  </div>
+  <div class="spacer"></div>
+  <label class="switch" id="modeSwitch">
+    <span class="lbl-as">AS-IS</span>
+    <span class="track"><span class="knob"></span></span>
+    <span class="lbl-fix">WITH 9-STEP PLAN</span>
+  </label>
+</div>
+
+<div class="wrap">
+
+<section style="margin-top:38px" class="reveal">
+  <div class="kicker">The machine, one picture</div>
+  <h2>Is everything in SKILL.md wired correctly?</h2>
+  <p class="lede">Every claim below comes from tonight's read-only recon of the installed skill, the fix-session worktree, the live herdr panes, and your other skills. Flip the switch top-right to overlay what the 9-step plan changes. Hover anything dotted for file:line evidence.</p>
+</section>
+
+<!-- ═══ 1 · THE LOOP ═══ -->
+<section class="reveal">
+  <div class="kicker">§1 · Runtime</div>
+  <h2><span class="num">01</span>The loop and its four support systems</h2>
+  <p class="lede">The LLM <em>is</em> the control plane. These eight steps run in the conductor's head; the boxes below are the only things with code behind them.</p>
+
+  <div class="rail">
+    <div class="step"><b>reconcile</b>read beads + panes</div>
+    <div class="step"><b>select</b>ready work</div>
+    <div class="step"><b>admit</b>RAM · PSI · slots</div>
+    <div class="step"><b>dispatch</b>route → harness</div>
+    <div class="step"><b>evidence</b>artifact tokens</div>
+    <div class="step"><b>review/fix</b>Droid lane</div>
+    <div class="step"><b>integrate</b>serialized merge</div>
+    <div class="step"><b>advance</b>next bead</div>
+  </div>
+  <div class="railnote">approval envelope sits in front of all of it — <em>"Approve mission"</em> gates launch; that part stays untouched.</div>
+
+  <div class="grid" style="margin-top:20px">
+
+    <div class="panel sys reveal">
+      <span class="tag route">routing</span>
+      <h3><span class="dot d-amber"></span>Routing — LLM judgment, three lanes</h3>
+
+      <div class="lane">
+        <div class="head"><span class="tier r">ROUTINE</span><span class="dest">→ headless</span><span class="badge b-bad lanebadge">contradicts your model</span></div>
+        <div class="mode">
+          <span class="asis">Destination <span class="tip" data-tip="SKILL.md:212 — 'explicit fast provider/model or direct bounded worker'">ambiguous</span>; <span class="tip" data-tip="SKILL.md:240 explicitly forbids delegate_task as a mission worker — the opposite of routine → separate Hermes instance">delegate_task is banned</span> → trivial work gets self-executed or over-routed to OMP.</span>
+          <span class="fix">Headless is fine: a <b>separate Hermes instance</b> via delegate_task, or a plain script. Never the conductor's own session, never self-implementation. No pane required.</span>
+        </div>
+      </div>
+
+      <div class="lane">
+        <div class="head"><span class="tier s">STANDARD</span><span class="dest">→ OMP</span><span class="badge b-warn lanebadge">headless today</span></div>
+        <div class="mode">
+          <span class="asis">OMP provider/model through <span class="tip" data-tip="SKILL.md:213 routes Standard here; dispatch_worker.py:128 spawns headless hermes chat -q --yolo — no visible pane">dispatch_worker.py</span> — correct harness, but the spawn is <b>invisible</b>.</span>
+          <span class="fix">OMP in a <b>visible herdr pane + dedicated worktree</b>, implements via <code style="font-family:var(--mono)">/goal</code>. Conductor judgment may still pick headless for trivial variants — recorded in the dispatch record.</span>
+        </div>
+      </div>
+
+      <div class="lane">
+        <div class="head"><span class="tier c">CRITICAL</span><span class="dest">→ OMP ×2 + Droid</span><span class="badge b-bad lanebadge">split brain</span></div>
+        <div class="mode">
+          <span class="asis">OMP mutating route + Droid review (<span class="tip" data-tip="SKILL.md:214">SKILL.md:214</span>) — but the plan-handoff pattern and <span class="tip" data-tip="PLAYBOOK.md:84 — 'Implementation command is /goal, never /go'">/goal rule</span> live <b>only in PLAYBOOK.md</b>, which SKILL.md never links. Merge = <span class="tip" data-tip="SKILL.md:55, 296-307 — 'named integration owner' may be the conductor itself; PLAYBOOK.md:75 says 'Droid only'">"named integration owner"</span> — contradicts the playbook.</span>
+          <span class="fix">OMP plans in <b>tab 1</b> → plan handed to a <b>second OMP instance</b> (new tab, same worktree) → implements <code style="font-family:var(--mono)">/goal</code> → Droid reviews → Droid fixes → <b>Droid commits &amp; merges</b>. /goal, never /go. Conductor judgment picks the lane; judgment goes in the dispatch record.</span>
+        </div>
+      </div>
+
+      <div class="law">merge authority: <em class="asis-fix">AS-IS "named owner (can be conductor)" → PLANNED "Droid only, after its fix pass"</em></div>
+    </div>
+
+    <div class="panel sys reveal">
+      <span class="tag exec">execution surface</span>
+      <h3><span class="dot d-cyan"></span>Herdr — panes, worktrees, visibility</h3>
+      <div class="crow"><code>devops/herdr</code><span class="note">pane lifecycle, status vocab (idle|working|blocked|done), <span class="tip" data-tip="devops/herdr SKILL.md:369 — 'Use pane run for TUI agents (OMP, Droid); agent start for Hermes'">pane-run rule for TUIs</span> ✓ linked</span></div>
+      <div class="crow"><code>PLAYBOOK topology</code><span class="note">wP primary + wX per-bundle worktree workspaces — exactly your shape, <b class="gap">never linked from SKILL.md</b> <span class="fixnote">→ step 03</span></span></div>
+      <div class="crow"><code>dispatch record</code><span class="note">dispatch_worker.py records pane/session — <b class="gap">but spawns headless, so there is no pane to record for workers</b> <span class="fixnote">→ step 05</span></span></div>
+      <div class="crow"><code>visibility</code><span class="note gap">"every OMP/Droid dispatch = visible pane + worktree" is an invariant <b>nowhere</b> <span class="fixnote" style="color:var(--green)">→ step 05</span></span></div>
+      <div class="crow"><code>skills/herdr</code><span class="note gap">⚠ stale 9.3KB stub <b>name-collides</b> with devops/herdr and contradicts it ("don't control sessions from outside") <span class="fixnote">→ step 07</span></span></div>
+    </div>
+
+    <div class="panel sys reveal">
+      <span class="tag time">timing &amp; wake-ups</span>
+      <h3><span class="dot d-violet"></span>Liveness — who notices a stall</h3>
+      <div class="crow"><code>controller_idle_watchdog.py</code><span class="note">non-LLM timer root · 30s poll / 90s min-repeat · wakes the <b>controller</b> pane ✓ <span class="tip" data-tip="Gas Town parity: this IS the daemon-timer root of the watchdog chain — already built">matches Gas Town's Boot role</span></span></div>
+      <div class="crow"><code>watch_worker_completion.py</code><span class="note">per worker: <span class="tip" data-tip="artifact with ≥32-hex completion token + pidfd//proc start-tick proof of launcher exit">artifact token + PID proof</span>, then herdr wake — <b>the strongest piece, keep it</b> ✓</span></div>
+      <div class="crow"><code>scheduler_decision.py</code><span class="note">RAM + PSI + swap admission math ✓ <span class="tip" data-tip="exit 0 even when blocked — the block is only readable in stdout JSON">⚠ exits 0 even when blocked</span></span></div>
+      <div class="crow"><code>worker panes</code><span class="note gap"><b>nobody watches them</b> — a stuck OMP pane is invisible until the next reconcile <span class="fixnote">→ step 09e (reconcile flags claims with no live pane)</span></span></div>
+    </div>
+
+    <div class="panel sys reveal">
+      <span class="tag ledg">ledger &amp; brain</span>
+      <h3><span class="dot d-green"></span>Beads + route_task()</h3>
+      <div class="crow"><code>bd</code><span class="note">tasks, deps, atomic claims, evidence, recovery history ✓ <span class="tip" data-tip="Same DAG backbone Gas Town uses — ready-node selection is 'no open blockers, priority asc, oldest first'">Gas Town runs on this exact ledger</span></span></div>
+      <div class="crow"><code>route_task()</code><span class="note">emits risk · workerRole · planFirst · independentReview — <b class="gap">no harness field</b>; routing brain and routing table don't talk <span class="fixnote">→ step 08 (+ harness default)</span></span></div>
+      <div class="crow"><code>auto-advance</code><span class="note gap">reconcile selects ready beads, but a <b>human nudge still moves work forward</b> <span class="fixnote">→ step 09b (claim + dispatch up to maxWorkers, no nudge)</span></span></div>
+      <div class="crow"><code>resume ritual</code><span class="note gap">a respawned pane is an <b>amnesiac</b> — nothing re-injects bead + brief <span class="fixnote">→ step 09a (relaunch = resume, Gas Town's gt-prime pattern)</span></span></div>
+    </div>
+  </div>
+
+  <div class="panel reveal" style="margin-top:16px">
+    <span class="tag route" style="background:rgba(240,113,138,.14);color:var(--rose)">checkups</span>
+    <h3><span class="dot d-rose"></span>Periodic checkups — you wrote tiers 1–2. They're orphaned.</h3>
+    <div class="tiers">
+      <div class="tiercard"><span class="tno">TIER 1 · frequent</span><b>Transition sweep</b><p>Harvest results, inventory live panes, close finished tabs, check headroom, refill slots. Runs on every wake / review / commit / merge.</p><span class="own">owned by kanban-orchestrator:56 + herdr/long-running-orchestration.md:194 — <b>conductor never links either</b></span></div>
+      <div class="tiercard"><span class="tno">TIER 2 · every 2–3 merges</span><b>Integrated-base health lane</b><p>One bounded read-only semantic auditor over the merged base; PASS = no blocker/high/medium; failures spawn isolated fix/* worktrees.</p><span class="own">owned by external-agent-review-loops cadence doc + kanban-orchestrator health lane — <b>conductor never links either</b></span></div>
+      <div class="tiercard"><span class="tno">TIER 3 · rare</span><b>Post-big-merge review</b><p>Big checkup after merging a lot of work together. <b>Exists nowhere as policy</b> — your phrase "final holistic review" appears only in a JobOS state log. One doc even argues against fixed cadence.</p><span class="own">owned by nobody — written into policy by step 06</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 2 · WIRING MAP ═══ -->
+<section class="reveal">
+  <div class="kicker">§2 · Invocations</div>
+  <h2><span class="num">02</span>What SKILL.md actually invokes</h2>
+  <p class="lede">The conductor is an umbrella skill — it only works if it names its companions. Green resolves today; red exists on disk but is invisible to a fresh conductor.</p>
+  <div class="wiregrid">
+    <div class="panel">
+      <h3 style="color:var(--green);font-size:15px">✓ LINKED (related_skills)</h3>
+      <div class="chips">
+        <span class="chip ok">agent-loop-engineering</span>
+        <span class="chip ok">devops/herdr</span>
+        <span class="chip ok">subagent-roles</span>
+        <span class="chip ok">requesting-code-review</span>
+        <span class="chip ok">test-driven-development</span>
+      </div>
+    </div>
+    <div class="panel">
+      <h3 style="color:var(--red);font-size:15px">✗ ORPHANED — exists, never invoked</h3>
+      <div class="chips">
+        <span class="chip miss">external-agent-review-loops <span class="fxtag">· step 06</span></span>
+        <span class="chip miss">kanban-orchestrator <span class="fxtag">· step 06</span></span>
+        <span class="chip miss">project-workspaces <span class="fxtag">· step 06</span></span>
+        <span class="chip miss">plan <span class="fxtag">· step 06</span></span>
+        <span class="chip miss">PLAYBOOK.md <span class="fxtag">· step 03</span></span>
+        <span class="chip miss">OMP · Droid (binaries, prose only)</span>
+      </div>
+    </div>
+    <div class="panel">
+      <h3 style="color:var(--amber);font-size:15px">⚠ Collisions &amp; internal conflicts</h3>
+      <div class="chips">
+        <span class="chip warn">skills/herdr stale stub ≠ devops/herdr <span class="fxtag">· step 07</span></span>
+        <span class="chip warn">beads-herdr-recipes.md:161 recommends spawn --background; SKILL.md:240 bans it <span class="fxtag">· step 07</span></span>
+        <span class="chip warn">worker-launch.md exists but SKILL.md never links it <span class="fxtag">· step 07</span></span>
+      </div>
+    </div>
+  </div>
+  <div class="wirenote">source repo <b>main is 4 commits behind</b> what's installed (a036e3c vs fa6ca20) — merge-back of the fix session is still pending. My edits mirror into installed + worktree so they stay byte-identical.</div>
+</section>
+
+<!-- ═══ 3 · SCORECARD ═══ -->
+<section class="reveal">
+  <div class="kicker">§3 · Verdicts</div>
+  <h2><span class="num">03</span>Subsystem scorecard</h2>
+  <div class="panel" style="padding:6px 10px">
+  <table>
+    <thead><tr><th>Concern</th><th>Lives in</th><th>In SKILL.md?</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td class="k">Routing tiers</td><td><code>SKILL.md §route</code> + <code>route_task()</code></td><td><span class="v mid">partial</span></td><td><span class="verdict">routine destination ambiguous; delegate_task banned <span class="fixnote">→ steps 01–02</span></span></td></tr>
+      <tr><td class="k">Harness choice</td><td><code>SKILL.md</code> rows + <code>PLAYBOOK</code></td><td><span class="v bad">split</span></td><td><span class="verdict">plan / /goal / fix / merge rules only in playbook <span class="fixnote">→ steps 01, 03</span></span></td></tr>
+      <tr><td class="k">Merge authority</td><td><code>SKILL.md:296</code> vs <code>PLAYBOOK:75</code></td><td><span class="v bad">contradictory</span></td><td><span class="verdict">"named owner" vs "Droid only" <span class="fixnote">→ step 04 (Droid only)</span></span></td></tr>
+      <tr><td class="k">Visibility</td><td><code>PLAYBOOK</code> topology only</td><td><span class="v bad">no</span></td><td><span class="verdict">not an invariant; scripted dispatch runs headless <span class="fixnote">→ step 05</span></span></td></tr>
+      <tr><td class="k">Dispatch record</td><td><code>dispatch_worker.py</code></td><td><span class="v ok">yes</span></td><td><span class="verdict">solid — needs pane-bound launches <span class="fixnote">→ step 05</span></span></td></tr>
+      <tr><td class="k">Completion detection</td><td><code>watch_worker_completion.py</code></td><td><span class="v ok">yes</span></td><td><span class="verdict">artifact token + PID proof — strongest piece</span></td></tr>
+      <tr><td class="k">Wake-ups / timing</td><td><code>watchdog</code> + <code>scheduler</code></td><td><span class="v ok">yes</span></td><td><span class="verdict">watches the controller, not worker panes <span class="fixnote">→ step 09e</span></span></td></tr>
+      <tr><td class="k">Admission math</td><td><code>scheduler_decision.py</code></td><td><span class="v ok">yes</span></td><td><span class="verdict">RAM+PSI, fail-closed policy ✓</span></td></tr>
+      <tr><td class="k">Checkups 1–2</td><td>two other skills</td><td><span class="v bad">no links</span></td><td><span class="verdict">written well, orphaned <span class="fixnote">→ step 06</span></span></td></tr>
+      <tr><td class="k">Checkup 3</td><td>nowhere</td><td><span class="v bad">missing</span></td><td><span class="verdict">doesn't exist as policy <span class="fixnote">→ step 06</span></span></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ═══ 4 · LIVE TOPOLOGY ═══ -->
+<section class="reveal">
+  <div class="kicker">§4 · Proof from the box</div>
+  <h2><span class="num">04</span>Live herdr topology at recon time</h2>
+  <div class="panel">
+    <div class="panes">
+      <div class="pane"><span class="pid">w1:pC</span> hermes <span class="st idle">idle</span> · Absolute Learning</div>
+      <div class="pane"><span class="pid">w2:p1</span> shell <span class="st unknown">—</span> · Bukti</div>
+      <div class="pane"><span class="pid">w1T:p1</span> hermes <span class="st working">working</span> · the fix session (gpt-5.6-terra)</div>
+      <div class="pane"><span class="pid">w1T:pQ</span> claude <span class="st working">working</span> · this session</div>
+      <div class="pane"><span class="pid">w2V:p1</span> shell <span class="st unknown">—</span> · gap-cleaner</div>
+    </div>
+    <div class="zeronote">OMP panes running: 0 · Droid panes running: 0 — the visible-pane pattern exists only as playbook prose today. <span style="display:none">After step 05, every OMP/Droid claim without a live pane gets flagged by reconcile.</span></div>
+  </div>
+</section>
+
+<!-- ═══ 5 · THE PLAN ═══ -->
+<section class="reveal">
+  <div class="kicker">§5 · What I will do</div>
+  <h2><span class="num">05</span>The 9-step plan</h2>
+  <p class="lede">Mirrored into installed skill + worktree (byte-identical, no commits unless you ask). Test suites run at the end. No live mission, Beads DB, or pane touched. Approval gates untouched.</p>
+  <div class="steps">
+    <div class="pstep"><span class="n"></span><div><b>Routing table rewrite</b><p>Three lanes in SKILL.md §route: routine → headless subagent/script · standard → OMP pane + /goal · critical → OMP plan tab → second OMP tab (same worktree) implements /goal → Droid review/fix/commit/merge. Lane choice = conductor judgment, recorded in the dispatch record. /goal, never /go.</p><div class="targets"><span>routing</span><span>SKILL.md</span></div></div><span class="pill">pending</span></div>
+    <div class="pstep"><span class="n"></span><div><b>Kill the delegate_task ban</b><p>Routine sub-agent dispatch becomes the default. The real rule: never in the conductor's own session, never self-implementation.</p><div class="targets"><span>routing</span><span>SKILL.md:240</span></div></div><span class="pill">pending</span></div>
+    <div class="pstep"><span class="n"></span><div><b>Link PLAYBOOK.md</b><p>Short section pointing to ~/.hermes/orchestration/PLAYBOOK.md for topology, /goal, Droid conventions, crash recovery.</p><div class="targets"><span>wiring</span><span>orchestration/</span></div></div><span class="pill">pending</span></div>
+    <div class="pstep"><span class="n"></span><div><b>Merge authority → Droid only</b><p>SKILL.md aligned to "Droid commits and merges, only after its fix pass". Kills the named-owner contradiction.</p><div class="targets"><span>merge</span><span>SKILL.md:296</span></div></div><span class="pill">pending</span></div>
+    <div class="pstep"><span class="n"></span><div><b>Visibility invariant</b><p>New non-negotiable: every OMP/Droid dispatch = visible herdr pane + dedicated worktree + dispatch record carrying pane_id. Headless allowed only for routine.</p><div class="targets"><span>herdr</span><span>dispatch_worker.py</span></div></div><span class="pill">pending</span></div>
+    <div class="pstep"><span class="n"></span><div><b>Checkups into SKILL.md</b><p>One section listing all three tiers; link external-agent-review-loops + kanban-orchestrator; both added to related_skills; tier-3 written as policy ("big review after merging a lot of work together").</p><div class="targets"><span>checkups</span><span>related_skills</span></div></div><span class="pill">pending</span></div>
+    <div class="pstep"><span class="n"></span><div><b>Orphan-wiring fixes</b><p>Link worker-launch.md + controller-release-and-handoff.md; fix the recipe doc recommending spawn --background; rename the stale skills/herdr stub (non-destructive) so only devops/herdr resolves.</p><div class="targets"><span>wiring</span><span>collisions</span></div></div><span class="pill">pending</span></div>
+    <div class="pstep"><span class="n"></span><div><b>route_task() + harness field</b><p>conductor_controller.py returns a harness default (routine→hermes-subagent · standard→omp · critical→omp-plan-handoff+droid) with eval scenarios; conductor may override with recorded rationale.</p><div class="targets"><span>routing</span><span>controller</span></div></div><span class="pill">pending</span></div>
+    <div class="pstep"><span class="n"></span><div><b>Gas Town five, cheaply</b><p>(a) relaunch re-injects bead + brief (resume ritual) · (b) reconcile auto-advances ready beads up to maxWorkers, no nudge · (c) transitions projected to the existing dashboard · (d) serialized Droid merge queue with auto-advance · (e) reconcile flags claims with no live pane.</p><div class="targets"><span>graph</span><span>liveness</span></div></div><span class="pill">pending</span></div>
+  </div>
+</section>
+
+<footer>
+  <span><b>Source:</b> read-only recon 2026-07-27 — pre-fix snapshot (skill v1.6.0). The fixes this board proposed have landed; the as-built picture is on the flow board.</span>
+  <span><b>Status:</b> plan executed 2026-07-27 — skill v1.7.0 shipped &amp; verified end-to-end · <a href="http://100.81.6.117:8768/?v=b5">as-built flow board ↗</a></span>
+</footer>
+
+</div>
+
+<script>
+document.getElementById('modeSwitch').addEventListener('click', () => {
+  document.body.classList.toggle('planned');
+});
+const clk = document.getElementById('clock');
+setInterval(() => {
+  clk.textContent = new Date().toLocaleTimeString('en-GB', {hour12:false});
+}, 1000);
+const io = new IntersectionObserver(es => es.forEach(e => {
+  if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+}), {threshold: 0.08});
+document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+</script>
+</body>
+</html>
