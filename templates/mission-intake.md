@@ -39,6 +39,22 @@ End an incomplete intake with:
 - Resource circuit breaker: {{RAM_PSI_SWAP_OUT_AND_CLASS_RESERVE_LIMITS}}
 - Focused gates: {{FOCUSED_GATES}}
 - Broad milestone gates: {{BROAD_GATES}}
+
+## Routing & execution plan
+
+Every unit the mission will dispatch, and exactly how it runs:
+
+| Unit | Risk lane | Harness chain | Review | Worktree / pane | Merge |
+|---|---|---|---|---|---|
+| {{UNIT_ROWS}} |
+
+- Review policy: plan-only units are **never** separately reviewed (the planning harness's embedded critic is the plan review); standard units get focused checks, with a Droid review only where marked above; critical implementations are always Droid-reviewed. Every "no review" row carries its reason.
+- Concurrency: up to {{CONCURRENT_WORKERS}} workers concurrently within {{MAX_WEIGHTED_SLOTS}} weighted slots; memory reserves are the real gate.
+- Anti-stall contract: every dispatch is verified live within 30 seconds of launch (otherwise failed and retried); every claim has a completion watcher; the idle watchdog is bound to the live controller session and wakes on ready work, dead claims, and session drift.
+- Integration: serialized Droid merge queue — Droid reviews → fixes → commits → merges; the conductor never merges.
+
+## Authorities
+
 - Local integration authorized: {{YES_NO_AND_EXACT_TARGET}}
 - Push authorized: {{YES_NO_AND_EXACT_TARGET}}
 - Release authorized: {{YES_NO_AND_EXACT_TARGET_OR_NO}}

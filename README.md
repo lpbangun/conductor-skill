@@ -114,7 +114,7 @@ Or provide an initial mission proposal:
 /conductor Implement feature X in ~/projects/myapp. Checkpointed; allow local integration into main; do not push.
 ```
 
-The first turn performs intake and produces a Mission Contract Preview. It does **not** launch work. Activation requires a later, exact approval:
+The first turn performs intake and produces a Mission Contract Preview, including a per-unit routing & execution plan (risk lane, harness chain, review requirement, merge path, anti-stall contract) for approval. It does **not** launch work. Activation requires a later, exact approval:
 
 ```text
 Approve mission

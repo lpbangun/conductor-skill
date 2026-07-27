@@ -1,7 +1,7 @@
 ---
 name: conductor
 description: "Use when the user authorizes a multi-step software mission that should continue autonomously across workers, worktrees, reviews, integration gates, failures, or session restarts. Orchestrates Beads as the durable ledger and Herdr as the execution surface with risk-proportional routing, evidence-backed transitions, resource admission, stale-claim recovery, and explicit human boundaries. Do not use for a single bounded task or strategy discussion without execution approval."
-version: 1.7.3
+version: 1.7.4
 author: Hermes Agent
 license: MIT
 platforms: [linux]
@@ -91,6 +91,7 @@ enter **intake mode only**. Do not initialize Beads, write a mission contract, c
    - measurable outcome and acceptance evidence;
    - in/out-of-scope boundaries or named milestone when ambiguous;
    - supervision mode (`interactive`, `checkpointed`, or `delegated`);
+   - per-unit routing: the work units with inferred risk lane and harness chain (shown in the preview for approval, not asked as questions when discovery can infer them);
    - local integration authority and exact target;
    - push authority and exact target.
 4. Default to `checkpointed`, a workload-aware capacity proposal derived from live host signals and approved `workloadClasses` (template `maxWeightedSlots: 4.0` with `light`/`standard`/`heavy` — four concurrent standard workers; memory reserves are the real gate), emergency `maxWorkers: 5` process ceiling (not proof that capacity is available), `maxCorrectionCycles: 5` for delegated long missions, no local integration, no push, no release/deploy, and preservation of branches/worktrees. After two materially similar correction failures, escalate execution strategy automatically rather than asking the user while below the approved total cap. Do not derive a universal worker cap from RAM. Label every default so the user can override it; live resource admission still governs every launch.
@@ -114,6 +115,7 @@ When intake is complete, render `templates/mission-intake.md` as one bounded **M
 
 - repo, integration branch, objective, milestone, in/out scope, and acceptance evidence;
 - supervision mode and runtime/persistence disclosure;
+- a per-unit **routing & execution plan**: every work unit with its risk lane, harness chain, review requirement (with explicit skip reasons), worktree + visible pane, merge path, the concurrency budget, and the anti-stall contract (verified launch, watcher per claim, watchdog bound to the live session) — nothing may dispatch differently from what the user approved here;
 - weighted `maxWeightedSlots` capacity, approved `workloadClasses`, emergency `maxWorkers` process ceiling, pressure/reserve thresholds, and retry/correction/broad-suite budgets;
 - local integration, push, release, deploy, destructive-operation, and cleanup authority;
 - focused/broad gates and dashboard policy;
@@ -127,7 +129,7 @@ Then say **“Nothing has launched.”** and ask the user to reply exactly:
 Approve mission
 ```
 
-Only an approval received after the latest preview activates that exact envelope. Earlier strategy approval, an inline imperative, “looks good,” or a bare `/conductor` is insufficient. If any material contract field changes, issue a new preview and require fresh approval.
+Only an approval received after the latest preview activates that exact envelope. Earlier strategy approval, an inline imperative, “looks good,” or a bare `/conductor` is insufficient. If any material contract field changes, issue a new preview and require fresh approval. The routing plan is part of the approved envelope: changing a unit's risk lane or review policy is a material change requiring a new preview and fresh approval; a harness override **within** an approved lane is conductor judgment, recorded as `routingJudgment` in the dispatch record, and does not require re-approval.
 
 After `Approve mission`, write and validate the approved contract, bootstrap/reconcile Beads, write the returned mission ID, validate the active-ledger gate, and only then create execution topology or launch workers. If any gate fails, remain inactive and report the exact missing evidence.
 
@@ -209,6 +211,8 @@ Do not initialize Beads during strategy discussion, overwrite an existing databa
 ### 3. Classify and route each ready unit
 
 Record both **risk** and **resource class** before claim. Execution risk does not determine resource class. Risk controls review/acceptance; resource class controls admission.
+
+The mission's routing plan — the table the user approved in the preview — is persisted as `routingPlan` in the mission-epic Beads metadata at bootstrap. Every dispatch must match it: same lane, same review policy. A change to a unit's risk lane or review policy is a material contract change (new preview + fresh approval); a harness override within an approved lane is recorded as `routingJudgment` in the dispatch record.
 
 | Risk | Lane | Harness chain | Required evidence |
 |---|---|---|---|
@@ -477,6 +481,7 @@ When synchronizing a public/source package with the installed skill, load `refer
 - [ ] Every active claim maps to one worker, pane, branch, worktree, and base SHA.
 - [ ] Delegated mode has exactly one verified-live idle watchdog for the current controller pane and one qualified completion watcher per active worker.
 - [ ] Weighted capacity, workload class reserves, available-RAM floor, PSI/swap-I/O pressure gates, emergency process ceiling, retry budget, and single full-suite/integration lanes are enforced; cumulative swap occupancy is not a unilateral blocker.
+- [ ] Every dispatched unit matches the approved routing plan (lane, review policy); deviations are re-approved or recorded as in-lane judgment.
 - [ ] Critical work (and Standard work where review was required) has independent review evidence at the exact candidate SHA; plan-only lanes carry no separate plan review.
 - [ ] Integrated-base checks and merge SHA are recorded before task closure.
 - [ ] Push/release/deploy occurred only under explicit authority.
