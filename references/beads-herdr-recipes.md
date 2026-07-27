@@ -155,13 +155,15 @@ HERDR_CONFIG_PATH="$HOME/.config/herdr/sessions/$SESSION" \
 
 Parse the returned opaque workspace ID. Before submitting work, inspect the workspace/pane and verify its actual cwd equals the claim metadata's absolute `worktree`; a label is not proof of cwd, branch, or SHA.
 
-For role-routed noninteractive Hermes workers when a visible TUI is unnecessary, a default companion launcher is:
+For routine headless Hermes workers when a visible TUI is unnecessary, the canonical launcher is:
 
 ```bash
-~/.local/bin/spawn-agent "$ROLE" "$TASK" --workdir "$WORKTREE" --background --json
+python3 scripts/dispatch_worker.py --worktree "$WORKTREE" --task-id "$TASK" --role "$ROLE" \
+  --brief "$BRIEF_FILE" --controller-pane "$PANE" --base-sha "$BASE_SHA" \
+  --result-json "$RESULT_JSON" --receipt "$RECEIPT"
 ```
 
-Install or configure the companion launcher when this route is used; the path is a default, not a universal machine fact.
+It returns a machine-readable dispatch record and attaches the completion watcher. `~/.local/bin/spawn-agent --background` is **not** a mission route — never use it. Standard/critical lanes always run in a visible Herdr pane (SKILL.md invariant 11); a visible pane is also the fallback whenever a routine route cannot return a stable watcher handle.
 
 Record the returned process/session handle in Beads and verify that exact process is live before marking the task working. If no stable handle is returned, use a visible Herdr pane instead.
 

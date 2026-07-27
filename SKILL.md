@@ -1,7 +1,7 @@
 ---
 name: conductor
 description: "Use when the user authorizes a multi-step software mission that should continue autonomously across workers, worktrees, reviews, integration gates, failures, or session restarts. Orchestrates Beads as the durable ledger and Herdr as the execution surface with risk-proportional routing, evidence-backed transitions, resource admission, stale-claim recovery, and explicit human boundaries. Do not use for a single bounded task or strategy discussion without execution approval."
-version: 1.6.0
+version: 1.7.0
 author: Hermes Agent
 license: MIT
 platforms: [linux]
@@ -9,7 +9,7 @@ metadata:
   created_by: agent
   hermes:
     tags: [conductor, orchestration, beads, herdr, worktrees, multi-agent, durable-missions]
-    related_skills: [agent-loop-engineering, herdr, subagent-roles, requesting-code-review, test-driven-development]
+    related_skills: [agent-loop-engineering, herdr, subagent-roles, requesting-code-review, test-driven-development, kanban-orchestrator, external-agent-review-loops]
 ---
 
 # Conductor
@@ -52,15 +52,16 @@ Do not use for:
 ## Non-negotiable invariants
 
 1. **Approval is scoped.** A user-approved mission contract authorizes only its objective, repositories, milestone, autonomy mode, resource limits, and side effects. New product strategy, destructive operations, force pushes, credential changes, releases, or scope expansion require renewed approval.
-2. **Conductor does not implement.** Delegate mutating product work to a bounded worker. The conductor may perform deterministic control-plane operations after verified PASS: update Beads, inspect state, create approved worktrees, run predetermined gates, commit already-reviewed changes when explicitly assigned as integration owner, merge without rebase, update the dashboard, and clean up owned resources.
+2. **Conductor does not implement, commit, or merge.** Delegate mutating product work to a bounded worker. The conductor may perform deterministic control-plane operations after verified PASS: update Beads, inspect state, create approved worktrees, run predetermined gates, update the dashboard, and clean up owned resources. Commits and merges belong to the serialized integration lane and are executed only by Droid (invariant 8).
 3. **Evidence beats self-report.** A worker’s “done” is a signal to inspect, never proof. Verify the exact worktree, branch, diff, SHA, commands, exit codes, review verdict, and integrated-base result.
 4. **One mutating owner per worktree.** Parallel mutation requires separate branches/worktrees. Shared integration files have one named owner.
 5. **No hidden authority.** Do not create a second database, scheduler, merge queue, or process registry. Shell directly to `bd --json` and Herdr’s live CLI. Delegated missions use two transparent mission-owned liveness processes defined in `references/speed-first-liveness.md`: one completion watcher per worker and one controller idle watchdog per dedicated pane. They may observe state and wake the sole controller, but they must not claim tasks, mutate Beads/Git, choose work, run tests, or run `scheduler_decision.py`.
 6. **Risk is not priority.** Beads priority P0–P4 means urgency. Store execution risk independently as `risk:routine`, `risk:standard`, or `risk:critical` labels plus metadata.
 7. **Speed-first, work-conserving, and parallelism-targeted.** Useful throughput is the scheduling objective. Resource policy is an admission constraint and circuit breaker, not the optimization target. Use `scripts/scheduler_decision.py` over the complete ready queue and launch the largest admitted set of productive, dependency-ready, non-overlapping lanes. Feasibility includes process headroom under `maxWorkers` and weighted headroom under `maxWeightedSlots`; when two fit, target at least two productive mission-owned workers. Do not fill the second lane with duplicate verification, speculative work, or shared-seam contention. Do not fill additional capacity with those substitutes either; when fewer than two productive lanes run, record the concrete dependency, ownership, capacity, or pressure reason.
-8. **Integration is serialized.** Never run concurrent merges, pushes, or duplicate full suites. Reconcile against a stable integration SHA before and after each merge.
-9. **Push is denied by default.** Local commit/merge authority does not imply push, release, deployment, primary-branch merge, history rewrite, or worktree deletion authority.
+8. **Integration is serialized and Droid-owned.** Never run concurrent merges, pushes, or duplicate full suites. Reconcile against a stable integration SHA before and after each merge. Merges into the integration branch are performed by Droid (Factory Droid, GLM-5.2 High — never default Opus) and Droid alone, after its review findings are fixed. The conductor authorizes and sequences the lane; it never commits or merges itself.
+9. **Push is denied by default.** Local integration authority does not imply push, release, deployment, primary-branch merge, history rewrite, or worktree deletion authority.
 10. **The governing skill is immutable during a mission.** Record lessons, but propose policy changes only after mission closure and user review.
+11. **Dispatch is visible.** Every OMP, Droid, or CLI-harness dispatch runs in a human-visible Herdr pane inside a dedicated worktree, and the dispatch record carries `pane_id`, workspace, worktree, branch, brief path, and the conductor's lane judgment. Headless dispatch (`delegate_task` sub-agent, `hermes chat -q`, plain scripts) is allowed only for routine work. If a visible pane cannot be opened for a standard or critical lane, that lane does not dispatch; record the blocker instead.
 
 ## `/conductor` command experience
 
@@ -174,6 +175,8 @@ Inspect authoritative sources, not remembered state:
 - Herdr workspaces/panes/agent status and available machine resources;
 - dashboard status only as a projection, never as authority.
 
+Flag every claim whose recorded pane is absent, exited, or not working as a recovery candidate in the same tick — a claim with no live pane is never silently left in-progress. Likewise, dependency-ready work auto-advances: recompute the ready frontier after each transition and dispatch/refill up to the admitted `maxWeightedSlots`/`maxWorkers` envelope without waiting for a human nudge.
+
 After a restart or context compression, perform this reconciliation before steering, reclaiming, merging, or launching anything.
 
 **Completion criterion:** every in-progress Bead maps to a live worker/worktree or is explicitly classified as a recovery candidate; every live mission-owned worker maps back to one Bead.
@@ -207,13 +210,15 @@ Do not initialize Beads during strategy discussion, overwrite an existing databa
 
 Record both **risk** and **resource class** before claim. Execution risk does not determine resource class. Risk controls review/acceptance; resource class controls admission.
 
-| Risk | Route | Required evidence |
-|---|---|---|
-| Routine | explicit fast provider/model or direct bounded worker | focused checks |
-| Standard | explicit OMP provider/model through `dispatch_worker.py` | focused checks + independent review |
-| Critical | explicit OMP mutating route; independent Factory Droid read-only review against exact candidate/base | invariant checks + fresh review + declared milestone gate |
+| Risk | Lane | Harness chain | Required evidence |
+|---|---|---|---|
+| Routine | fast, headless | Hermes sub-agent via `delegate_task` (a separate instance, never the conductor's own session) or a plain script; trivial automation needs no agent at all | focused checks |
+| Standard | visible implementation | OMP in a visible Herdr pane + dedicated worktree, implements with `/goal` (never `/go`) → Droid reviews → Droid fixes → Droid commits + merges | focused checks + independent review |
+| Critical | visible plan handoff | OMP plans in a visible pane (tab 1, plan-only) → frozen plan handed to a second OMP instance (tab 2, same worktree) that implements with `/goal` → Droid reviews → Droid fixes → Droid commits + merges | invariant checks + fresh review + declared milestone gate |
 
-A provider/model is a dispatch field, never an inference from a fallback list. Record requested and accepted route in Beads. If the selected route is unavailable, stop that lane and record the fallback decision; do not silently substitute a harness. Escalate risk for cross-cutting interfaces, security/schema/external effects, repeated correction, or irreversible actions. A Critical lane may still be `light` or `standard` resource class.
+The conductor decides the lane. That judgment — routine/standard/critical plus its rationale — is itself a dispatch field recorded in the dispatch record and Beads metadata (`routingJudgment`). `scripts/conductor_controller.py route_task()` emits a harness default per risk (`routine→hermes-subagent`, `standard→omp`, `critical→omp` plan+implement, review/merge always `droid`); the conductor may override the default but must record the override rationale. A provider/model is a dispatch field, never an inference from a fallback list. Record requested and accepted route in Beads. If the selected route is unavailable, stop that lane and record the fallback decision; do not silently substitute a harness. Droid is the review/fix/commit/merge lane only — it never implements. Independent review is read-only: Factory Droid read-only review against the exact candidate/base SHA. Headless dispatch is routine-only (invariant 11). Escalate risk for cross-cutting interfaces, security/schema/external effects, repeated correction, or irreversible actions. A Critical lane may still be `light` or `standard` resource class.
+
+The full harness flow — OMP plan-only pane → `/goal` implementation pane → Droid review/fix/commit/merge — is codified in `~/.hermes/orchestration/PLAYBOOK.md`. Read it before dispatching any standard or critical lane; this skill and that playbook must not disagree, and where they do, the stricter authority boundary wins.
 
 **Completion criterion:** risk, resource class, route, rationale, acceptance, ownership, and verification are durable before claim.
 
@@ -237,7 +242,9 @@ Before dispatch:
 
 ### 5. Claim, dispatch, and establish evidence identity
 
-Claim through Beads before opening a dedicated Herdr workspace. Record `worktree`, `branch`, `base_sha`, `role`, `route`, `resource_class`, and `ownership`. Then use `scripts/dispatch_worker.py` with a file-backed brief and current controller pane/session. It launches `watch_worker_completion.py`; every active worker has a verified completion-wake handle. Persist its `beadsMetadata` only after the returned launcher and watcher identities are live and exact. Never return idle while an active worker is unwatched. Never use `delegate_task` as a mission worker/reviewer and never use `spawn_agent --background`.
+Claim through Beads before opening a dedicated Herdr workspace. Record `worktree`, `branch`, `base_sha`, `role`, `route`, `resource_class`, and `ownership`. Then use `scripts/dispatch_worker.py` with a file-backed brief and current controller pane/session (contract in `references/worker-launch.md`). It launches `watch_worker_completion.py`; every active worker has a verified completion-wake handle. Persist its `beadsMetadata` only after the returned launcher and watcher identities are live and exact. Never return idle while an active worker is unwatched. `delegate_task` is the routine lane only: a separate headless Hermes sub-agent is acceptable for routine work, but never for standard/critical mission worker or reviewer roles, and never a substitute for the conductor's own session. Never use `spawn_agent --background`; standard and critical lanes dispatch through visible Herdr panes (invariant 11), and a routine lane that needs a watcher uses `dispatch_worker.py`.
+
+Relaunch is resume: a relaunched worker is never started from empty context. Re-inject its bead (ID, metadata, lease state), the original file-backed brief, the current SHA/diff of its worktree, and the prior dispatch record, so the fresh process resumes the same bounded task instead of rediscovering it.
 
 Delegated supervision has one verified live pane/session-bound `scripts/controller_idle_watchdog.py`. It is wake-only: it cannot claim, schedule, test, mutate Git/Beads/worktrees, or select routes; it must not run `scheduler_decision.py`. A controller replacement retires old watchers and creates a fresh pane/session binding; a session mismatch is a durable recovery state, not an implicit retarget.
 
@@ -293,9 +300,11 @@ Store concise evidence in Beads metadata and append detailed command/output refe
 
 ### 8. Integrate deterministically
 
-Only the contract's named integration owner may enter this serialized lane. Refuse to merge unless `authority.localIntegrationAuthorized` is true and the current owner matches `authority.integrationOwner`.
+Only Droid enters this serialized lane, and only after its review fix pass is complete — Droid reviews, Droid fixes its findings, then Droid commits and merges (see `~/.hermes/orchestration/PLAYBOOK.md`, steps 5–7). The contract must name `droid` as `authority.integrationOwner`; any other owner value fails closed. Refuse to merge unless `authority.localIntegrationAuthorized` is true and the current owner is Droid. The conductor authorizes the lane, hands Droid the exact candidate/base, and inspects the integrated evidence — it never commits or merges itself.
 
-1. Atomically acquire the native Beads merge slot as the named integration owner; failure means wait, not merge.
+Reviewed-PASS candidates form a serialized Droid merge queue: one merge at a time, and after each merge plus its post-merge check completes, the next candidate auto-advances to Droid without a human nudge, inside the approved envelope.
+
+1. Atomically acquire the native Beads merge slot for the Droid integration lane; failure means wait, not merge.
 2. Verify candidate SHA and clean integration checkout.
 3. Refresh normally without rebasing or rewriting active worker history.
 4. Merge deliberately with a normal/no-fast-forward merge when project policy allows.
@@ -328,6 +337,20 @@ A user pause/stop overrides the roadmap immediately. Cancel owned watchers, clos
 
 **Completion criterion:** authoritative state, live processes, Git, dashboard, and user-facing verdict agree.
 
+## Checkups
+
+Three tiers. Every tier is read-only inspection of Beads↔Git↔Herdr consistency; a checkup never merges, pushes, or rewrites state — findings become new beads.
+
+| Tier | When | What | Owner skill |
+|---|---|---|---|
+| 1 · transition sweep | after every material transition (claim, verdict, merge, recovery, restart) | fast consistency sweep: every in-progress bead maps to a live pane + worktree, every live worker maps back to one bead, dispatch records complete, no claim without a live pane | `kanban-orchestrator` |
+| 2 · integrated-base health | every 2–3 merges | deeper sweep of the integrated branch: focused suite on the integrated base, orphan branch/worktree scan, watcher-destination audit, dashboard reconciliation | `external-agent-review-loops` (integrated-base review cadence) |
+| 3 · post-big-merge | after a merge integrating 3+ beads, or a large cross-lane composition | full health: broad suite on the post-merge SHA, remote parity (only if `pushAuthorized`), dependency-graph width check, stale-claim sweep, metrics checkpoint | this skill (policy below) |
+
+Tier-3 policy: trigger when one merge integrates 3+ beads or touches a shared contract. Run the broad suite once on the post-merge SHA, verify remote parity only under explicit push authority, sweep for claims with no live pane, and publish exactly one dashboard transition. A tier-3 checkup gates the next dispatch wave, not a human; actionable findings become beads and ambiguous ones escalate to the user.
+
+The conductor's judgment decides which tier a transition earns; record the tier in the dashboard transition.
+
 ## Stale-claim recovery
 
 Beads has no native lease enforcement. Treat an expired `claim_lease` only as a recovery candidate.
@@ -349,7 +372,7 @@ Then:
 
 ## Dashboard projection
 
-The password-protected dashboard is read-only and sanitized. Update it only after material transitions: mission start/pause/complete, task claim, blocker, test/review verdict, integration, strategy gate, or recovery. Do not publish every heartbeat.
+The password-protected dashboard is read-only and sanitized. Update it only after material transitions: mission start/pause/complete, task claim, blocker, test/review verdict, integration, strategy gate, recovery, **and every routing/dispatch event** (lane, harness, pane_id, checkup tier). Dispatch events belong on the dashboard, not only in pane scrollback — they are how a human watches which agent is doing what. Do not publish every heartbeat.
 
 When the contract enables a dashboard, read its path from `mission.json`, update its sanitized source, and run from that exact path:
 
@@ -415,7 +438,7 @@ Follow `references/detached-herdr-stage.md` for the reusable launch, watcher, ar
 
 When the mission is also evaluating Conductor itself, do not let one session both operate the mission and judge whether the skill caused correct behavior. Use a dedicated persistent interactive Conductor pane as the **sole** control-plane mutator, keep workers beneath it, and make the parent/meta session a read-only evaluator. Freeze the controller session to the skill snapshot it loaded for the evaluation interval; collect findings separately and normally patch only after mission closure and user review. If the user explicitly orders a library update at a bounded checkpoint, record that the active controller remains bound to its prior loaded snapshot and require a fresh controller session before attributing behavior to the new version. A one-shot controller is insufficient because it cannot remain available for completion-wake events.
 
-Handoff must bind approved authority, Beads/Git/Herdr paths, active launcher PID/start identity, leases, watchers and their destination panes, artifacts, review findings, budgets, and unused launch tokens. The receiving Conductor must independently reconcile every claim before acting. Explicitly retire the old controller, discard unclaimed tokens, and ensure inherited watchers either target the new pane or have a temporary relay; dual controllers invalidate mission ownership and evaluation evidence.
+Handoff must bind approved authority, Beads/Git/Herdr paths, active launcher PID/start identity, leases, watchers and their destination panes, artifacts, review findings, budgets, and unused launch tokens. The receiving Conductor must independently reconcile every claim before acting. Explicitly retire the old controller, discard unclaimed tokens, and ensure inherited watchers either target the new pane or have a temporary relay; dual controllers invalidate mission ownership and evaluation evidence. Follow `references/controller-release-and-handoff.md` for operator pause/repair isolation and controller release.
 
 Follow `references/external-supervision.md` for the reusable topology, safe handoff sequence, evaluation signals, and pitfalls.
 
@@ -423,32 +446,13 @@ For deterministic controller/watchdog changes, use `references/read-only-continu
 
 ## Controller admission evaluation
 
-Before the first live mission under a new or materially changed deterministic controller, require a fixed pre-controller evaluation contract. Never treat evaluator self-tests, an implementer-authored `QUALIFIED` JSON, a process exit code, or a hash-bound self-attestation as proof that the controller passes. Load `references/controller-admission-evidence.md` for provenance, real-canary, independent-review, exact-publication, adversarial-validator, and parent-reproduction requirements.
+Before the first live mission under a new or materially changed deterministic controller, require a fixed pre-controller evaluation contract. Evaluator self-tests, implementer-authored `QUALIFIED` JSON, process exit codes, and hash-bound self-attestation are never proof of passing.
 
-The admission suite must measure at least:
+The admission suite must measure at least: exact Routine/Standard/Critical routing (conflicting signals, escalation, 100% Critical recall, zero unsafe under-routing); generated worker-prompt completeness, zero-context executability, exact authority boundaries, and independent hash-bound semantic review; event-driven reconciliation and wake behavior with no blind `wait`/`sleep` plus stale-process failure injection; Herdr ownership, cross-system identity, explicit worktree paths, and zero close/reuse of foreign panes; learning-record destination and quality; deterministic fail-closed integration ordering where every safety-bearing input requires an exact boolean (`is True`/`is False`), never generic truthiness; and resource admission at approved workload/reserve/pressure boundaries, including malformed/missing metrics, workload-class differences, weighted-slot exhaustion below the emergency process ceiling, and proof that cumulative swap occupancy alone must not block.
 
-- exact Routine/Standard/Critical routing, including conflicting signals, escalation, 100% Critical recall, and zero unsafe under-routing;
-- generated worker-prompt completeness, conciseness, zero-context executability, exact authority boundaries, and independent hash-bound semantic review;
-- event-driven reconciliation and wake behavior with no blind `wait`/`sleep`, explicit tick evidence, stale-process failure injection, and unrelated-lane progress;
-- Herdr ownership, cross-system identity, explicit worktree paths, prompt pane/workspace opening, prompt cleanup of mission-owned terminal states, and zero close/reuse of unknown or foreign panes;
-- learning-record destination and quality: evidence, recurrence, confidence, deduplication, secret/transcript exclusion, ephemeral-data discard, and no active-mission policy rewrite;
-- deterministic integration ordering and fail-closed authority, owner, merge-slot, drift, dirty-state, conflict, test, push-target, parity, and slot-release paths; every safety-bearing input must require an exact boolean (`is True`/`is False`), never generic truthiness, and malformed/missing authorization must block before merge or closure;
-- resource admission at approved workload/reserve/pressure boundaries, including high sticky swap with healthy PSI, low-RAM-only, sustained-PSI-only, active-swap-I/O-only, concurrent unrelated load, missing/malformed/NaN/infinite/out-of-range metrics, workload-class capacity differences (`light` vs `heavy`), weighted-slot exhaustion below the emergency process ceiling, and proof that unsafe resources block both workspace opening and dispatch while cleanup/recovery continues; cumulative swap occupancy alone must not block;
+Use two distinct layers: an offline deterministic suite (missing adapter/controller returns a distinct `NOT_READY` failure, never skip or pass) and external admission evidence (hash-bound prompt review, an isolated named-session Herdr canary on a disposable repository, and dashboard publication bound to the current artifact that semantically projects actual controller state). Qualification publication is a two-phase transaction (`PENDING_FINAL_ADMIPTION` → `QUALIFIED`) with attempted rollback on any post-qualification failure; final admission is the last operation allowed to mutate report, canary, or publication evidence; and material change to the admission path requires fresh independent hash-bound review. Only an explicit final `QUALIFIED` permits the first bounded live mission; `NOT_READY`, offline `FAIL`, or `PENDING_EXTERNAL` prohibits launch.
 
-Use two distinct layers:
-
-1. **Offline deterministic suite:** failure-injection fixtures and scorers run against the real controller adapter. Missing adapter/controller must return a distinct `NOT_READY` failure, never skip or pass.
-2. **External admission evidence:** independent review must bind to hashes of generated prompts; an isolated named-session Herdr canary must use a disposable repository and command-output evidence; dashboard publication must bind to the current offline report artifact **and semantically project the actual controller/admission state**. A matching digest beside stale copy such as “controller absent,” an unfinished controller stage, or the wrong weighted progress is a failed dashboard gate.
-
-For admission runners that publish qualification status, use a two-phase transition: publish and validate an accurate `PENDING_FINAL_ADMISSION` projection, compute all gates, then—only if they qualify—publish `QUALIFIED`, probe the exact live URL again, validate the final semantic projection, and recompute/write the final admission artifact from that second publication. Pass the actual prompt-review, canary, offline, and dashboard validation objects into the recomputation; never replace them with hard-coded `{"passed": true}` stand-ins merely because an earlier phase passed.
-
-Treat the second publication as a transaction. Every failure after setting or publishing `QUALIFIED`—build, test, publish, live probe, semantic validation, or recomputation—must attempt to restore `PENDING_FINAL_ADMISSION`, rebuild/test/republish it, require the exact live probe, and validate rollback evidence. The failure artifact must record whether rollback was attempted and succeeded; rollback failure is an explicit unsafe external-state blocker, not a normal FAIL with implied cleanup.
-
-Run all unit, failure-injection, compilation, offline, and independent-review work before final admission. Final admission is the last operation allowed to mutate the offline report, dashboard source/public artifact, canary report, prompt-review envelope, or publication evidence. The runner must persist the exact in-memory offline report used for that run before publication, then bind both its canonical object digest and replayable file-byte SHA. After it succeeds, use only read-only digest and validator checks against that persisted file; rerunning a timing-bearing offline suite or dashboard builder can invalidate otherwise-correct bindings. Bind the final report to the canonical offline digest, offline artifact byte digest, raw independent-review artifact, fresh canary artifact, final dashboard status, dashboard-evidence object, and publish receipt.
-
-A material change to the evaluator, semantic validator, canary, publication runner, rollback path, or admission wiring requires a fresh independent hash-bound review of those exact code and test files—not merely reuse of unchanged prompt scores. Archive prior raw PASS/FAIL reviews unchanged and regenerate the reviewed bundle.
-
-The runner must derive every declared pre-mission gate and fail closed on unknown required gates. Only an explicit final `QUALIFIED` result may permit the first bounded live mission. `NOT_READY`, offline `FAIL`, or `PENDING_EXTERNAL` prohibits launch. Preserve the evaluation fixtures as a fixed acceptance contract during controller implementation; changes to thresholds or expected outputs require separate review rather than controller-driven relaxation.
+Load `references/controller-admission-evidence.md` for the full provenance, real-canary, adversarial-validator, exact-publication, parent-reproduction, and rollback requirements.
 
 **Completion criterion:** the real controller adapter passes the offline suite, independent prompt review, isolated Herdr canary, failure-injection gates, and bound dashboard evidence; the final artifact says `QUALIFIED` and can be reproduced without touching a real project.
 

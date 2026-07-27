@@ -13,6 +13,10 @@ Use this release checklist for continuation-runtime changes.
 
 The canary must show `wakeDelivered: true`, a controller working transition, durable throttle/ack state, and no Beads mutation by the watchdog. Close the disposable workspace and remove its repository afterward.
 
+## Operator pause and repair isolation
+
+If the user says stop, cancel, or pause while a mission is active, that instruction overrides the roadmap immediately. Before changing this skill or its runtime package: stop mission-owned controller/worker/watchdog processes, release active Beads claims, persist the pause reason, close only owned paused/completed panes, and preserve Git/Beads evidence. Do not run a new controller, review, gate, or canary against the live mission. Perform package repair in an isolated source worktree and test with disposable fixtures; resume only after the user explicitly directs it.
+
 For a controller replacement: retire the prior pane/guard, create the new controller at the mission repo, deliver a file-backed handoff, bind the returned session, start one tracked watchdog, prove its singleton lock, and only then resume any observer.
 
 Do not install on test-only evidence, bind a null session, or treat process existence as qualification.

@@ -13,7 +13,7 @@ Use `scripts/dispatch_worker.py` for every active Conductor implementation or in
 5. proves the watcher’s argv, PID, and start ticks; and
 6. emits one JSON dispatch record or a non-zero failure with no qualifying partial state.
 
-The worker brief must require the returned `completionToken` and `resultJson` path in its artifact. Store every JSON field named `beadsMetadata` in the claimed task before treating the worker as live.
+The worker brief must require the artifact JSON to contain a `completionMarker` field exactly equal to the injected completion token (`{{COMPLETION_TOKEN}}`) and the `resultJson` path (`{{RESULT_JSON}}`); the completion watcher validates `completionMarker` and rejects any artifact with a missing or mismatched value (no wake, manual reconcile). Store every JSON field named `beadsMetadata` in the claimed task before treating the worker as live.
 
 ## Role and route choice
 

@@ -77,6 +77,8 @@ These are referenced by the policy and should be installed/configured when their
 - Hermes `subagent-roles` skill for role-specific worker/model routing
 - Hermes `requesting-code-review` skill for independent review workflows
 - Hermes `test-driven-development` skill for RED/GREEN implementation routes
+- Hermes `kanban-orchestrator` skill for tier-1 transition-sweep checkups
+- Hermes `external-agent-review-loops` skill for tier-2 integrated-base health checkups
 - credentials and model providers required by the chosen worker roles
 - an optional sanitized dashboard project when `dashboard.enabled` is true
 
@@ -140,6 +142,7 @@ Conductor defaults to:
 - fail-closed admission using available RAM reserves, memory PSI, and active swap-out rate;
 - independent review for Standard and Critical work;
 - serialized merges, pushes, and broad test suites; focused tests may overlap independent work and do not consume broad-suite budget;
+- integration executed by Droid only, after its review fix pass — the conductor authorizes the lane but never commits or merges;
 - evidence inspection rather than worker self-report;
 - preservation of branches and worktrees during ambiguous recovery.
 
@@ -158,6 +161,7 @@ python3 scripts/test_contract.py -v
 python3 scripts/test_invocation_contract.py -v
 python3 scripts/test_scheduler_liveness.py -v
 python3 scripts/test_controller_watchdog.py -v
+python3 scripts/test_dispatch_worker.py -v
 python3 scripts/smoke_test.py
 python3 -m py_compile scripts/*.py
 ```
