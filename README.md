@@ -140,7 +140,7 @@ Conductor defaults to:
 - at least two productive workers are targeted whenever two dependency-ready, non-overlapping lanes fit the approved resource envelope;
 - workload-weighted capacity (`maxWeightedSlots` with `light`/`standard`/`heavy` classes) plus an emergency mission-owned process ceiling (`maxWorkers` 1–6) that is not proof of capacity;
 - fail-closed admission using available RAM reserves, memory PSI, and active swap-out rate;
-- independent review for Standard and Critical work;
+- independent review always for Critical work; Standard work receives focused checks with review at conductor judgment; plan-only lanes are never separately reviewed;
 - serialized merges, pushes, and broad test suites; focused tests may overlap independent work and do not consume broad-suite budget;
 - integration executed by Droid only, after its review fix pass — the conductor authorizes the lane but never commits or merges;
 - evidence inspection rather than worker self-report;

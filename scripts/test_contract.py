@@ -102,8 +102,8 @@ class MissionContractTests(unittest.TestCase):
 
     def test_template_has_workload_aware_pressure_defaults(self):
         budgets = self.doc["budgets"]
-        self.assertEqual(budgets["maxWorkers"], 3)
-        self.assertEqual(budgets["maxWeightedSlots"], 3.0)
+        self.assertEqual(budgets["maxWorkers"], 5)
+        self.assertEqual(budgets["maxWeightedSlots"], 4.0)
         self.assertEqual(budgets["minAvailableRamGb"], 2)
         self.assertEqual(budgets["resourceSampleSeconds"], 10)
         self.assertEqual(budgets["maxMemoryPsiFullAvg10"], 5.0)

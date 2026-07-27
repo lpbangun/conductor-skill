@@ -34,8 +34,8 @@
     "cleanupTargets": []
   },
   "budgets": {
-    "maxWorkers": 3,
-    "maxWeightedSlots": 3.0,
+    "maxWorkers": 5,
+    "maxWeightedSlots": 4.0,
     "minAvailableRamGb": 2,
     "resourceSampleSeconds": 10,
     "maxMemoryPsiFullAvg10": 5.0,
