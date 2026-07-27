@@ -1,7 +1,7 @@
 ---
 name: conductor
 description: "Use when the user authorizes a multi-step software mission that should continue autonomously across workers, worktrees, reviews, integration gates, failures, or session restarts. Orchestrates Beads as the durable ledger and Herdr as the execution surface with risk-proportional routing, evidence-backed transitions, resource admission, stale-claim recovery, and explicit human boundaries. Do not use for a single bounded task or strategy discussion without execution approval."
-version: 1.7.2
+version: 1.7.3
 author: Hermes Agent
 license: MIT
 platforms: [linux]
@@ -245,6 +245,10 @@ Before dispatch:
 Claim through Beads before opening a dedicated Herdr workspace. Record `worktree`, `branch`, `base_sha`, `role`, `route`, `resource_class`, and `ownership`. Then use `scripts/dispatch_worker.py` with a file-backed brief and current controller pane/session (contract in `references/worker-launch.md`). It launches `watch_worker_completion.py`; every active worker has a verified completion-wake handle. For visible interactive Droid review in a detached worktree, materialize the exact brief in that worktree before launch and use the canonical PID/start-ticks/token/worker-created-result-artifact watcher flow; a plain `herdr wait agent-status ... done` is telemetry, not a qualified watcher. See `references/visible-droid-review-handoff.md`. Persist its `beadsMetadata` only after the returned launcher and watcher identities are live and exact. Never return idle while an active worker is unwatched. `delegate_task` is the routine lane only: a separate headless Hermes sub-agent is acceptable for routine work, but never for standard/critical mission worker or reviewer roles, and never a substitute for the conductor's own session. Never use `spawn_agent --background`; standard and critical lanes dispatch through visible Herdr panes (invariant 11), and a routine lane that needs a watcher uses `dispatch_worker.py`.
 
 Relaunch is resume: a relaunched worker is never started from empty context. Re-inject its bead (ID, metadata, lease state), the original file-backed brief, the current SHA/diff of its worktree, and the prior dispatch record, so the fresh process resumes the same bounded task instead of rediscovering it.
+
+A dispatch is live only once verified: within 30 seconds of pane launch, Herdr must show a live agent in the pane (agent-status working, or a launcher PID proven in `/proc`). Otherwise the dispatch is **failed** — record the failure in Beads metadata and retry; never report "dispatched" on pane creation alone, and never leave the bead claimed against a pane with no agent.
+
+If the controller pane's live session drifts from the idle watchdog's binding (for example after `hermes --resume`), the watchdog still wakes with a `controller_session_drift` warning carrying a rebinding instruction — retire the old watchdog and start a fresh one bound to the observed session. A stale binding must never become a silent permanent non-wake.
 
 Delegated supervision has one verified live pane/session-bound `scripts/controller_idle_watchdog.py`. It is wake-only: it cannot claim, schedule, test, mutate Git/Beads/worktrees, or select routes; it must not run `scheduler_decision.py`. A controller replacement retires old watchers and creates a fresh pane/session binding; a session mismatch is a durable recovery state, not an implicit retarget.
 

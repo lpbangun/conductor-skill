@@ -226,8 +226,8 @@ else: print(json.dumps({'error':'unexpected','args':args})); sys.exit(2)
         self.assertEqual(out["reason"], "controller_working")
         self.assertFalse(self.herdr_log.exists())
 
-    def test_pane_agent_session_and_cwd_are_bound(self):
-        cases = ({"agent":"codex"}, {"session":"other-session"}, {"cwd":str(self.root / "other")})
+    def test_pane_agent_and_cwd_are_bound(self):
+        cases = ({"agent":"codex"}, {"cwd":str(self.root / "other")})
         for changes in cases:
             with self.subTest(changes=changes):
                 self._set_herdr("idle", **changes)
@@ -236,6 +236,43 @@ else: print(json.dumps({'error':'unexpected','args':args})); sys.exit(2)
                 self.assertNotEqual(cp.returncode, 0)
                 self.assertFalse(out["wakeDelivered"])
                 self.assertFalse(self.herdr_log.exists())
+
+    def test_session_drift_wakes_with_rebinding_instruction(self):
+        self._set_herdr("idle", session="session-resumed")
+        self._set_bd(ready=[{"id": "task-1"}])
+        _, out = self._run()
+        self.assertTrue(out["wakeDelivered"])
+        self.assertEqual(out["reason"], "controller_session_drift")
+        self.assertEqual(out["sessionDrift"], "session-resumed")
+        logged = [json.loads(x) for x in self.herdr_log.read_text().splitlines()]
+        message = logged[0][3]
+        self.assertIn("session-resumed", message)
+        self.assertIn("Retire this watchdog", message)
+        self.assertIn("session-1", message)
+
+    def test_session_drift_wakes_even_with_fully_watched_frontier(self):
+        self._set_herdr("idle", session="session-resumed")
+        self._live_watcher()
+        self._set_bd(
+            tasks=[{
+                "id": "task-1", "status": "in_progress",
+                "metadata": self._watcher_metadata(
+                    str(self.repo / ".hermes/conductor/results/task-1.json")
+                ),
+            }]
+        )
+        _, out = self._run()
+        self.assertTrue(out["wakeDelivered"])
+        self.assertEqual(out["reason"], "controller_session_drift")
+
+    def test_session_drift_working_controller_is_not_interrupted(self):
+        self._set_herdr("working", session="session-resumed")
+        self._set_bd(ready=[{"id": "task-1"}])
+        _, out = self._run()
+        self.assertFalse(out["wakeDelivered"])
+        self.assertEqual(out["reason"], "controller_working")
+        self.assertEqual(out["sessionDrift"], "session-resumed")
+        self.assertFalse(self.herdr_log.exists())
 
     def test_contract_mission_id_mismatch_fails_closed(self):
         contract = {"mission":{"status":"active"}, "ledger":{"missionId":"other-mission"}}

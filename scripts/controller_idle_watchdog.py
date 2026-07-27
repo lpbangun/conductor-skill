@@ -35,6 +35,23 @@ MAX_MIN_REPEAT_SECONDS = 86400.0
 EXPECTED_WATCHER_SCRIPT = str(Path(__file__).resolve().parent / "watch_worker_completion.py")
 
 
+class SessionDrift(RuntimeError):
+    """The controller pane identity verifies but its session changed.
+
+    A resumed controller session gets a new session ID.  The pane is
+    still the mission pane (agent and cwd verify), so the watchdog must
+    keep waking it — a stale binding may never become a permanent
+    silencer.  The wake carries a rebinding instruction.
+    """
+
+    def __init__(self, observed_session: Any, pane_status_value: str):
+        super().__init__(
+            f"controller pane session drifted; observed {observed_session!r}"
+        )
+        self.observed_session = observed_session
+        self.pane_status_value = pane_status_value
+
+
 def run_json(argv: list[str], *, cwd: Path | None = None) -> Any:
     cp = subprocess.run(argv, cwd=cwd, text=True, capture_output=True, timeout=COMMAND_TIMEOUT_SECONDS)
     if cp.returncode != 0:
@@ -56,27 +73,39 @@ def pane_status(herdr: str, pane: str, repo: Path, session_id: str) -> str:
     pane_data = data.get("result", {}).get("pane", {}) if isinstance(data, dict) else {}
     if pane_data.get("pane_id") != pane or pane_data.get("agent") != "hermes":
         raise RuntimeError("controller pane identity is not the expected Hermes pane")
-    session = pane_data.get("agent_session")
-    observed_session = session.get("value") if isinstance(session, dict) else None
-    if observed_session != session_id:
-        raise RuntimeError("controller pane session does not match the bound session")
     observed_cwd = pane_data.get("foreground_cwd") or pane_data.get("cwd")
     if not isinstance(observed_cwd, str) or Path(observed_cwd).resolve() != repo:
         raise RuntimeError("controller pane cwd does not match the mission repository")
     status = pane_data.get("agent_status") or pane_data.get("status")
     if not isinstance(status, str) or not status:
         raise RuntimeError("herdr pane get did not report agent status")
+    session = pane_data.get("agent_session")
+    observed_session = session.get("value") if isinstance(session, dict) else None
+    if observed_session != session_id:
+        # Pane identity (agent + cwd) verifies; only the session changed.
+        # Raise drift, not a hard error, so the wake path stays alive.
+        raise SessionDrift(observed_session, status.lower())
     return status.lower()
+
+
+def observe_controller_status(
+    herdr: str, pane: str, repo: Path, session_id: str
+) -> tuple[str, str | None]:
+    """Return (status, drifted_observed_session); drift is not an error here."""
+    try:
+        return pane_status(herdr, pane, repo, session_id), None
+    except SessionDrift as drift:
+        return drift.pane_status_value, drift.observed_session
 
 
 def wait_for_working_status(
     herdr: str, pane: str, repo: Path, session_id: str, timeout_seconds: float = 3.0
 ) -> str:
     deadline = time.monotonic() + timeout_seconds
-    status = pane_status(herdr, pane, repo, session_id)
+    status, _drift = observe_controller_status(herdr, pane, repo, session_id)
     while status not in WORKING_CONTROLLER_STATES and time.monotonic() < deadline:
         time.sleep(0.1)
-        status = pane_status(herdr, pane, repo, session_id)
+        status, _drift = observe_controller_status(herdr, pane, repo, session_id)
     return status
 
 
@@ -352,11 +381,18 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     if not mission_is_active(repo, args.mission_id):
         return 0, {"wakeDelivered": False, "reason": "mission_not_active"}
 
-    status = pane_status(args.herdr_bin, args.pane, repo, args.session_id)
+    status, drift_observed = observe_controller_status(
+        args.herdr_bin, args.pane, repo, args.session_id
+    )
     if status in WORKING_CONTROLLER_STATES:
-        return 0, {"wakeDelivered": False, "reason": "controller_working", "controllerStatus": status}
+        result = {"wakeDelivered": False, "reason": "controller_working", "controllerStatus": status}
+        if drift_observed is not None:
+            result["sessionDrift"] = drift_observed
+        return 0, result
     unrecognized_status = status not in IDLE_CONTROLLER_STATES
-    if unrecognized_status:
+    if drift_observed is not None:
+        reason = "controller_session_drift"
+    elif unrecognized_status:
         reason = f"controller_status_unrecognized:{status}"
     else:
         reason = ""
@@ -381,7 +417,12 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     qualified = qualified_watcher_tasks(args.pane, args.session_id, tasks, watchers)
     unqualified_in_progress = sorted(set(in_progress) - qualified)
 
-    if unrecognized_status:
+    if drift_observed is not None:
+        # Session drift dominates: the binding must be repaired, and a stale
+        # binding must never silence frontier wakes. Fingerprint throttling
+        # prevents a storm; every drift wake repeats the rebinding instruction.
+        reason = "controller_session_drift"
+    elif unrecognized_status:
         # A new Herdr state must not become a silent permanent non-wake. Wake once
         # with the observed state; fingerprint throttling prevents a storm.
         reason = f"controller_status_unrecognized:{status}"
@@ -431,14 +472,23 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             "inProgress": in_progress,
         }
 
+    drift_note = (
+        f"WATCHDOG BINDING STALE: this guard is bound to session {args.session_id} "
+        f"but the pane runs {drift_observed}. Retire this watchdog and start a fresh "
+        "controller_idle_watchdog bound to the observed session before dispatching. "
+        if drift_observed is not None
+        else ""
+    )
     message = (
-        f"Wake guard ({reason}): reconcile mission {args.mission_id} from durable Beads/Git/process/artifact evidence now. "
+        f"Wake guard ({reason}): {drift_note}reconcile mission {args.mission_id} from durable Beads/Git/process/artifact evidence now. "
         f"Ready={','.join(ready) or 'none'}; in_progress={','.join(in_progress) or 'none'}; "
         f"unqualified_in_progress={','.join(unqualified_in_progress) or 'none'}. "
         "If an authorized dependency-ready/resource-safe lane exists, sample resources, run scheduler_decision.py, and dispatch/refill immediately. "
         "Do not merely summarize the next action and return idle. If a real human boundary blocks progress, record the exact boundary durably."
     )
-    pre_submit_status = pane_status(args.herdr_bin, args.pane, repo, args.session_id)
+    pre_submit_status, _pre_drift = observe_controller_status(
+        args.herdr_bin, args.pane, repo, args.session_id
+    )
     if pre_submit_status in WORKING_CONTROLLER_STATES:
         return 0, {
             "wakeDelivered": False,
@@ -465,6 +515,7 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         "reason": reason,
         "acknowledged": False,
         "submitPhase": "pending",
+        **({"observedSession": drift_observed} if drift_observed is not None else {}),
     }
     try:
         save_state(Path(args.state), state_payload)
@@ -522,6 +573,7 @@ def evaluate_once(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         "ready": ready,
         "inProgress": in_progress,
         "qualifiedWatchers": sorted(qualified),
+        **({"sessionDrift": drift_observed} if drift_observed is not None else {}),
     }
 
 
