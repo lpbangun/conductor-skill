@@ -46,7 +46,7 @@ python3 "${HERMES_HOME:-$HOME/.hermes}/skills/autonomous-ai-agents/conductor/scr
 
 - `approvedBy` and `approvedAt`: non-empty for approved/active missions.
 - `localIntegrationAuthorized`: permits only reviewed local integration into `integrationBranch`.
-- `integrationOwner`: stable identity allowed to acquire the Beads merge slot; normally `conductor`.
+- `integrationOwner`: must be `droid`; Droid alone may acquire the Beads merge slot and perform the reviewed fix/commit/merge lane.
 - `pushAuthorized`: defaults false.
 - `authorizedPushTarget`: required when push is true, e.g. `origin feature/milestone`; it does not authorize another remote/branch.
 - `destructiveOpsAuthorized`: defaults false. Even when true, the exact destructive action still requires an explicit task and pre-action state inspection.

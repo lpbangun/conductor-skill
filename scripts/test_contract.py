@@ -88,6 +88,13 @@ class MissionContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must be an integer"):
             self.validate()
 
+    def test_max_full_suites_allows_extended_serial_gate_budget(self):
+        self.doc["budgets"]["maxFullSuites"] = 8
+        self.validate()
+        self.doc["budgets"]["maxFullSuites"] = 101
+        with self.assertRaisesRegex(ValueError, "maxFullSuites"):
+            self.validate()
+
     # --- Workload-aware + pressure-aware resource admission budgets ---
 
     def test_template_has_no_max_swap_used_percent(self):
@@ -231,10 +238,15 @@ class MissionContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "authorizedPushTarget"):
             self.validate()
 
-    def test_integration_owner_is_required(self):
+    def test_integration_owner_must_be_droid(self):
         self.doc["authority"]["integrationOwner"] = ""
         with self.assertRaisesRegex(ValueError, "integrationOwner"):
             self.validate()
+        self.doc["authority"]["integrationOwner"] = "conductor"
+        with self.assertRaisesRegex(ValueError, "must be 'droid'"):
+            self.validate()
+        self.doc["authority"]["integrationOwner"] = "droid"
+        self.validate()
 
     # --- Release / deploy / cleanup authority fields ---
 

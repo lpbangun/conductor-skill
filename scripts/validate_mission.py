@@ -27,7 +27,7 @@ BUDGET_RANGES = {
     "staleAfterMinutes": (5, 240),
     "maxRetriesPerTask": (0, 5),
     "maxCorrectionCycles": (0, 5),
-    "maxFullSuites": (0, 5),
+    "maxFullSuites": (0, 100),
 }
 INTEGER_BUDGETS = {
     "maxWorkers", "resourceSampleSeconds", "staleAfterMinutes",
@@ -121,7 +121,12 @@ def validate(doc: dict[str, Any], *, require_approved: bool, require_active: boo
     ):
         if not isinstance(need(authority, key, "authority"), bool):
             raise ValueError(f"authority.{key}: must be boolean")
-    nonempty_string(need(authority, "integrationOwner", "authority"), "authority.integrationOwner")
+    integration_owner = nonempty_string(
+        need(authority, "integrationOwner", "authority"),
+        "authority.integrationOwner",
+    )
+    if integration_owner != "droid":
+        raise ValueError("authority.integrationOwner: must be 'droid'")
     push_target = need(authority, "authorizedPushTarget", "authority")
     if not isinstance(push_target, str):
         raise ValueError("authority.authorizedPushTarget: must be a string")

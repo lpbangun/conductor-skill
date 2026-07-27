@@ -22,7 +22,7 @@
     "approvedBy": "",
     "approvedAt": "",
     "localIntegrationAuthorized": false,
-    "integrationOwner": "conductor",
+    "integrationOwner": "droid",
     "pushAuthorized": false,
     "authorizedPushTarget": "",
     "destructiveOpsAuthorized": false,
