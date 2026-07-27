@@ -15,6 +15,13 @@ Use `scripts/dispatch_worker.py` for every active Conductor implementation or in
 
 The worker brief must require the artifact JSON to contain a `completionMarker` field exactly equal to the injected completion token (`{{COMPLETION_TOKEN}}`) and the `resultJson` path (`{{RESULT_JSON}}`); the completion watcher validates `completionMarker` and rejects any artifact with a missing or mismatched value (no wake, manual reconcile). Store every JSON field named `beadsMetadata` in the claimed task before treating the worker as live.
 
+## TUI lanes (OMP, Droid)
+
+TUI harnesses never exit at task end, so the watcher's exit-triggered path never runs and a worker that finished without writing its artifact is invisible until the timeout. Two rules close that hole:
+
+- The brief must require the exact same completion artifact (result JSON with `completionMarker`) as hermes lanes — state the result path and the token value explicitly in the brief.
+- Launch the watcher with `--worker-pane <lane pane>` (plus `--idle-after-seconds`, default 600). After the idle threshold, the watcher samples the worker pane; three consecutive idle observations with no artifact produce a manual-reconcile wake instead of waiting out the timeout. On that wake, inspect the worktree and pane transcript; if the work is done, instruct the WORKER to write its own artifact — the conductor never synthesizes it.
+
 ## Role and route choice
 
 - A durable plan freeze that writes/commits a plan is a write-capable `task` lane, scoped to the plan/docs path.

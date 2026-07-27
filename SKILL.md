@@ -1,7 +1,7 @@
 ---
 name: conductor
 description: "Use when the user authorizes a multi-step software mission that should continue autonomously across workers, worktrees, reviews, integration gates, failures, or session restarts. Orchestrates Beads as the durable ledger and Herdr as the execution surface with risk-proportional routing, evidence-backed transitions, resource admission, stale-claim recovery, and explicit human boundaries. Do not use for a single bounded task or strategy discussion without execution approval."
-version: 1.7.5
+version: 1.7.6
 author: Hermes Agent
 license: MIT
 platforms: [linux]
@@ -252,6 +252,10 @@ Relaunch is resume: a relaunched worker is never started from empty context. Re-
 
 A dispatch is live only once verified: within 30 seconds of pane launch, Herdr must show a live agent in the pane (agent-status working, or a launcher PID proven in `/proc`). Otherwise the dispatch is **failed** — record the failure in Beads metadata and retry; never report "dispatched" on pane creation alone, and never leave the bead claimed against a pane with no agent.
 
+TUI workers (OMP, Droid) never exit at task end, so "watched" is not "working" by itself: every TUI brief must require the same completion artifact as hermes lanes — a result JSON at the named path containing `completionMarker` with the injected token — and the watcher must be launched with `--worker-pane <lane pane>` so a worker idle at its prompt without an artifact triggers a manual-reconcile wake after ten minutes instead of riding out the timeout. If that wake fires, the worker writes its own artifact (never the conductor) or the lane is recovered from inspected evidence.
+
+**Prompt and watcher discipline:** `herdr pane run` can leave a prompt staged but unsubmitted. Inspect the pane after injection; if text remains in the composer, focus it, send one `ENTER`, and verify `agent_status: working` within 30 seconds before claiming the lane. Never reuse a completed OMP/Droid session for another lane: create a fresh pane/session and file-backed brief, because stale context can redirect work. A plain `herdr wait`, heartbeat, or explanatory Beads field is not a qualified completion watcher. Every Standard/Critical claim must be launched through `dispatch_worker.py` or the role-specific canonical watcher flow, with exact launcher/watcher PID+start ticks, token-bound result path, receipt, pane, and current controller session persisted before it is treated as in-progress. If that topology cannot be established, fail the dispatch closed, clear the claim, preserve the worktree, and relaunch canonically—never repeatedly acknowledge wake-guard warnings.
+
 If the controller pane's live session drifts from the idle watchdog's binding (for example after `hermes --resume`), the watchdog still wakes with a `controller_session_drift` warning carrying a rebinding instruction — retire the old watchdog and start a fresh one bound to the observed session. A stale binding must never become a silent permanent non-wake.
 
 Delegated supervision has one verified live pane/session-bound `scripts/controller_idle_watchdog.py`. It is wake-only: it cannot claim, schedule, test, mutate Git/Beads/worktrees, or select routes; it must not run `scheduler_decision.py`. A controller replacement retires old watchers and creates a fresh pane/session binding; a session mismatch is a durable recovery state, not an implicit retarget.
@@ -270,7 +274,7 @@ Do not repeatedly resend prompts, infer failure from one watcher timeout, or rec
 
 **Blocked is an evidence state, not a mood.** A bead may be marked blocked only with an exact boundary durably recorded in its metadata — a named dependency, ownership conflict, resource ceiling, or a human authority decision with where and when it was asked. Invented gates are forbidden: if the approved contract already authorizes an action (Droid-owned commit/merge under `localIntegrationAuthorized` is the canonical case), requiring further human approval is an error. Reconcile treats every blocked bead lacking a durable boundary as a recovery candidate: verify, unblock, and redispatch. The idle watchdog audits blocked beads and wakes for this check.
 
-A heartbeat is a compact metadata update, not prose chatter. Refresh it after observable progress, a test/review transition, or bounded supervision interval. Do not use heartbeats to conceal a worker that is idle at a prompt.
+A heartbeat is a compact metadata update, not prose chatter. Refresh it after observable progress, a test/review transition, or bounded supervision interval. Do not use heartbeats to conceal a worker that is idle at a prompt. If a visible worker is stopped at its own scoped approval UI for an already-authorized, reversible command, the controller must actively submit the approval and verify `agent_status: working` (or record the failed launch); leaving text or a pending approval at the prompt is not productive work and is not a human boundary.
 
 **Completion criterion:** each active lane is progressing, safely waiting on an explicit gate, or has one recorded recovery action; unrelated ready work continues.
 

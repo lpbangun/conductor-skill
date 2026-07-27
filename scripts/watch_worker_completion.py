@@ -120,6 +120,28 @@ def run_herdr(binary: str, args: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+WORKER_IDLE_PANE_STATES = {"idle", "done", "exited", "paused"}
+
+
+def worker_pane_is_idle(herdr_bin: str, pane: str) -> bool:
+    """Best-effort check that a TUI worker sits idle at its prompt.
+
+    Observation failures never count as idle — they just do not advance
+    the confirmation counter, so a herdr hiccup cannot manufacture a
+    manual-reconcile wake.
+    """
+    cp = run_herdr(herdr_bin, ["pane", "get", pane])
+    if cp.returncode != 0:
+        return False
+    try:
+        data = json.loads(cp.stdout)
+    except json.JSONDecodeError:
+        return False
+    pane_data = data.get("result", {}).get("pane", {}) if isinstance(data, dict) else {}
+    status = pane_data.get("agent_status")
+    return isinstance(status, str) and status.lower() in WORKER_IDLE_PANE_STATES
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--worker-pid", type=int, required=True)
@@ -137,6 +159,17 @@ def main() -> int:
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--herdr-bin", default="herdr")
     parser.add_argument("--timeout-seconds", type=float, default=7200.0)
+    parser.add_argument(
+        "--worker-pane",
+        default="",
+        help="Optional TUI worker pane; enables idle-without-artifact detection for harnesses that never exit at task end (OMP/Droid).",
+    )
+    parser.add_argument(
+        "--idle-after-seconds",
+        type=float,
+        default=600.0,
+        help="With --worker-pane: idle sampling starts after this many seconds without an artifact.",
+    )
     args = parser.parse_args()
 
     started_monotonic = time.monotonic()
@@ -160,11 +193,15 @@ def main() -> int:
         or not valid_completion_token(args.marker_value)
         or not valid_task_id(args.task_id)
         or not valid_pane_id(args.conductor_pane)
+        or (args.worker_pane and not valid_pane_id(args.worker_pane))
+        or (args.worker_pane and args.idle_after_seconds <= 0)
     ):
-        receipt["error"] = "invalid worker PID, timeout, marker key/token, task ID, or pane ID"
+        receipt["error"] = "invalid worker PID, timeout, marker key/token, task ID, pane ID, or idle threshold"
         receipt["manualReconcile"] = True
         atomic_json(args.receipt, receipt)
         return 2
+    if args.worker_pane:
+        receipt["workerPane"] = args.worker_pane
 
     if os.path.lexists(args.result_json):
         receipt["error"] = "completion artifact predates watcher attachment"
@@ -211,16 +248,74 @@ def main() -> int:
         return 3
 
     deadline = started_monotonic + args.timeout_seconds
+    exited = False
+    idle_without_artifact = False
     try:
-        exited = wait_for_exit(args.worker_pid, expected_ticks, deadline, attached_pidfd)
+        if args.worker_pane:
+            # TUI harnesses (OMP/Droid) never exit at task end: interleave
+            # exit waiting with idle-at-prompt sampling so a worker that
+            # finished without writing its artifact is surfaced for manual
+            # reconcile instead of silently riding out the full timeout.
+            idle_confirmations = 0
+            while time.monotonic() < deadline:
+                slice_deadline = min(time.monotonic() + 1.0, deadline)
+                if wait_for_exit(args.worker_pid, expected_ticks, slice_deadline, attached_pidfd):
+                    exited = True
+                    break
+                if time.monotonic() - started_monotonic < args.idle_after_seconds:
+                    idle_confirmations = 0
+                    continue
+                if os.path.lexists(args.result_json):
+                    idle_confirmations = 0
+                    continue
+                if worker_pane_is_idle(args.herdr_bin, args.worker_pane):
+                    idle_confirmations += 1
+                else:
+                    idle_confirmations = 0
+                if idle_confirmations >= 3:
+                    idle_without_artifact = True
+                    break
+        else:
+            exited = wait_for_exit(args.worker_pid, expected_ticks, deadline, attached_pidfd)
     finally:
         if attached_pidfd is not None:
             os.close(attached_pidfd)
-    if not exited:
+    if not exited and not idle_without_artifact:
         receipt["error"] = "worker completion timeout"
         receipt["manualReconcile"] = True
         atomic_json(args.receipt, receipt)
         return 4
+
+    if idle_without_artifact:
+        receipt["workerIdleWithoutArtifact"] = True
+        receipt["manualReconcile"] = True
+        exit_observed_monotonic = time.monotonic()
+        message = (
+            f"Conductor manual-reconcile event: task {args.task_id} worker PID {args.worker_pid} "
+            f"is idle at pane {args.worker_pane} with NO completion artifact after "
+            f"{int(args.idle_after_seconds)}s. Inspect the worktree, focused checks, and the pane "
+            "transcript yourself. If the work is genuinely done, instruct the WORKER to write its "
+            "completion artifact (never synthesize it), then re-qualify and continue the lane. "
+            "Resample resources, run scheduler_decision.py, and refill every other safe productive lane."
+        )
+        receipt["wakeMessage"] = message
+        sent = run_herdr(args.herdr_bin, ["pane", "send-text", args.conductor_pane, message])
+        if sent.returncode != 0:
+            receipt["error"] = f"wake text failed: {sent.stderr.strip()}"
+            atomic_json(args.receipt, receipt)
+            return 7
+        entered = run_herdr(args.herdr_bin, ["pane", "send-keys", args.conductor_pane, "ENTER"])
+        if entered.returncode != 0:
+            receipt["error"] = f"wake enter failed: {entered.stderr.strip()}"
+            atomic_json(args.receipt, receipt)
+            return 8
+        receipt["conductorWakeDelivered"] = True
+        receipt["wakeDeliveredAt"] = utc_now()
+        receipt["completionToWakeSeconds"] = time.monotonic() - exit_observed_monotonic
+        atomic_json(args.receipt, receipt)
+        print(json.dumps(receipt, sort_keys=True))
+        return 0
+
     exit_observed_monotonic = time.monotonic()
     receipt["workerExitObserved"] = True
     receipt["workerExitObservedAt"] = utc_now()

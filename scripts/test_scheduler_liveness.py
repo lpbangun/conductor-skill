@@ -348,30 +348,34 @@ class CompletionWakeTests(unittest.TestCase):
             if any(not item.exists() for item in required):
                 print("wake attempted before launcher lifecycle completed", file=sys.stderr)
                 raise SystemExit(9)
-            forbidden_pid = os.environ.get("FAKE_HERDR_FORBID_PID")
-            forbidden_ticks = os.environ.get("FAKE_HERDR_FORBID_START_TICKS")
-            if forbidden_pid and forbidden_ticks:
-                try:
-                    raw = pathlib.Path(f"/proc/{forbidden_pid}/stat").read_text()
-                    tail = raw[raw.rfind(")") + 2:].split()
-                    if tail[0] != "Z" and int(tail[19]) == int(forbidden_ticks):
-                        print("wake attempted while exact launcher identity was still live", file=sys.stderr)
-                        raise SystemExit(9)
-                except FileNotFoundError:
-                    pass
             log = pathlib.Path(os.environ["FAKE_HERDR_LOG"])
             rows = json.loads(log.read_text()) if log.exists() else []
             rows.append(args)
             log.write_text(json.dumps(rows))
             if args[:2] == ["pane", "get"]:
-                print(json.dumps({"result": {"pane": {"pane_id": args[2]}}}))
+                pane = {"pane_id": args[2]}
+                status = os.environ.get("FAKE_HERDR_PANE_STATUS")
+                if status:
+                    pane["agent_status"] = status
+                print(json.dumps({"result": {"pane": pane}}))
             else:
+                forbidden_pid = os.environ.get("FAKE_HERDR_FORBID_PID")
+                forbidden_ticks = os.environ.get("FAKE_HERDR_FORBID_START_TICKS")
+                if forbidden_pid and forbidden_ticks:
+                    try:
+                        raw = pathlib.Path(f"/proc/{forbidden_pid}/stat").read_text()
+                        tail = raw[raw.rfind(")") + 2:].split()
+                        if tail[0] != "Z" and int(tail[19]) == int(forbidden_ticks):
+                            print("wake attempted while exact launcher identity was still live", file=sys.stderr)
+                            raise SystemExit(9)
+                    except FileNotFoundError:
+                        pass
                 print(json.dumps({"result": {"type": "ok"}}))
         """))
         path.chmod(0o755)
         return path
 
-    def run_watcher(self, root: Path, worker_code: str, marker_value=TOKEN, required_wake_files=()):
+    def run_watcher(self, root: Path, worker_code: str, marker_value=TOKEN, required_wake_files=(), extra_args=(), pane_status=None, run_timeout=8, forbid_live_worker_wake=True):
         result_path = root / "result.json"
         receipt_path = root / "receipt.json"
         log_path = root / "herdr-log.json"
@@ -394,17 +398,74 @@ class CompletionWakeTests(unittest.TestCase):
             "--receipt", str(receipt_path),
             "--herdr-bin", str(fake_herdr),
             "--timeout-seconds", "5",
+            *extra_args,
         ]
         env = os.environ.copy()
         env["FAKE_HERDR_LOG"] = str(log_path)
         env["FAKE_HERDR_REQUIRE"] = os.pathsep.join(str(path) for path in required_wake_files)
-        env["FAKE_HERDR_FORBID_PID"] = str(worker.pid)
-        env["FAKE_HERDR_FORBID_START_TICKS"] = str(start_ticks)
+        if forbid_live_worker_wake:
+            env["FAKE_HERDR_FORBID_PID"] = str(worker.pid)
+            env["FAKE_HERDR_FORBID_START_TICKS"] = str(start_ticks)
+        if pane_status:
+            env["FAKE_HERDR_PANE_STATUS"] = pane_status
         started = time.monotonic()
-        watcher = subprocess.run(cmd, env=env, text=True, capture_output=True, timeout=8)
+        watcher = subprocess.run(cmd, env=env, text=True, capture_output=True, timeout=run_timeout)
         elapsed = time.monotonic() - started
-        worker.wait(timeout=2)
+        try:
+            worker.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            worker.kill()
+            worker.wait()
         return watcher, elapsed, result_path, receipt_path, log_path
+
+    def test_idle_tui_worker_without_artifact_wakes_manual_reconcile(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            worker_code = "import time; time.sleep(60)"  # TUI-like: alive, never writes an artifact
+            watcher, elapsed, _, receipt, log = self.run_watcher(
+                root,
+                worker_code,
+                extra_args=[
+                    "--worker-pane", "w5:p2",
+                    "--idle-after-seconds", "0.2",
+                    "--timeout-seconds", "60",
+                ],
+                pane_status="idle",
+                run_timeout=30,
+                forbid_live_worker_wake=False,  # idle-path wake is designed to fire with the worker alive
+            )
+            self.assertEqual(0, watcher.returncode, watcher.stderr)
+            self.assertLess(elapsed, 15, "idle detection must fire long before the timeout")
+            data = json.loads(receipt.read_text())
+            self.assertTrue(data["workerIdleWithoutArtifact"])
+            self.assertTrue(data["manualReconcile"])
+            self.assertTrue(data["conductorWakeDelivered"])
+            self.assertFalse(data["workerExitObserved"])
+            self.assertIn("manual-reconcile", data["wakeMessage"])
+            self.assertIn("never synthesize", data["wakeMessage"])
+            calls = json.loads(log.read_text())
+            self.assertIn(["pane", "send-keys", "w9:p1", "ENTER"], calls)
+
+    def test_worker_pane_branch_still_completes_on_exit_and_artifact(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            worker_code = (
+                "import json,pathlib,sys,time; time.sleep(.2); "
+                "pathlib.Path(sys.argv[1]).write_text(json.dumps({'completionMarker':'" + TOKEN + "','status':'PASS'}))"
+            )
+            watcher, _, _, receipt, _ = self.run_watcher(
+                root,
+                worker_code,
+                extra_args=["--worker-pane", "w5:p2", "--idle-after-seconds", "5"],
+                pane_status="working",
+                run_timeout=15,
+            )
+            self.assertEqual(0, watcher.returncode, watcher.stderr)
+            data = json.loads(receipt.read_text())
+            self.assertTrue(data["workerExitObserved"])
+            self.assertTrue(data["completionArtifactValidated"])
+            self.assertTrue(data["conductorWakeDelivered"])
+            self.assertNotIn("workerIdleWithoutArtifact", data)
 
     def test_real_worker_exit_and_worker_artifact_wake_conductor(self):
         with tempfile.TemporaryDirectory() as temp:
