@@ -1,7 +1,0 @@
-{
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "embedded",
-  "dolt_database": "controller_continuation_runtime",
-  "project_id": "71f2bcfe-70ec-49d8-9189-792c56df4c41"
-}
